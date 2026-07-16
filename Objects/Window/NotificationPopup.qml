@@ -14,7 +14,7 @@ PopupWindow {
     anchor.rect.x: 0
     anchor.rect.y: mainWindow.height
     implicitWidth: 420
-    height: 500
+    implicitHeight: display.implicitHeight > 0 ? display.implicitHeight : 80
     color: "transparent"
     visible: false
 
@@ -54,12 +54,13 @@ PopupWindow {
 
     RowLayout {
         width: popup.width
+        height: display.implicitHeight
 
         Notification {
             id: display
-            // Pass the live notification object so actions render correctly
             notification: popup.notification
             Layout.alignment: Qt.AlignCenter
+            Layout.fillWidth: true
         }
     }
 

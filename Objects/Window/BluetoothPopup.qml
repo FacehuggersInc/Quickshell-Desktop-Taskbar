@@ -65,7 +65,12 @@ PopupWindow {
         id: focusGrab
         active: false
         windows: [ bluetoothPopup ]
-        onCleared: bluetoothPopup.forceClose()
+        onCleared: {
+            alphaAnim.stop()
+            bluetoothPopup.isClosing = false
+            bluetoothPopup.visible = false
+            background.opacity = 0
+        }
     }
 
     // ── Timers ────────────────────────────────────────────────────

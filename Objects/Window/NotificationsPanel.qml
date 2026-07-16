@@ -17,8 +17,12 @@ PopupWindow {
     anchor.rect.x: Screen.width
     anchor.rect.y: mainWindow.height + 5
 
+    // Width is fixed; height fits content up to screen height
     implicitWidth: 400
-    implicitHeight: Screen.height - mainWindow.height - 10
+    implicitHeight: Math.min(
+        headerRow.implicitHeight + 16 + 1 + 8 + notifColumn.implicitHeight + 24,
+        Screen.height - mainWindow.height - 10
+    )
 
     color: "transparent"
     visible: false
@@ -55,7 +59,19 @@ PopupWindow {
         id: focusGrab
         active: false
         windows: [ notificationsPanel ]
-        onCleared: notificationsPanel.close()
+        onCleared: {
+            // Always close regardless of animation state
+            if (notificationsPanel.isAnimating) {
+                slideAnim.stop()
+                alphaAnim.stop()
+                notificationsPanel.isAnimating = false
+            }
+            notificationsPanel.isOpen = false
+            notificationsPanel.visible = false
+            panelBackground.x = notificationsPanel.implicitWidth
+            panelBackground.alpha = 0
+            focusGrab.active = false
+        }
     }
 
     RoundedBlock {
@@ -77,6 +93,7 @@ PopupWindow {
 
             // ── Header ────────────────────────────────────────────
             RowLayout {
+                id: headerRow
                 Layout.fillWidth: true
                 Layout.topMargin: 12
                 Layout.leftMargin: 16
@@ -158,7 +175,7 @@ PopupWindow {
                 opacity: 0.1
             }
 
-            // ── Notification list — properly scrollable ────────────
+            // ── Notification list ─────────────────────────────────
             ScrollView {
                 id: notifScroll
                 Layout.fillWidth: true
@@ -168,7 +185,6 @@ PopupWindow {
                 clip: true
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                 ScrollBar.vertical.policy: ScrollBar.AsNeeded
-                // contentHeight must be set explicitly for scroll to work
                 contentHeight: notifColumn.implicitHeight
                 contentWidth: notificationsPanel.implicitWidth - 32
 
@@ -176,7 +192,6 @@ PopupWindow {
                     id: notifColumn
                     width: notificationsPanel.implicitWidth - 32
                     spacing: 8
-                    // Keep the x centred within the ScrollView viewport
                     x: 16
 
                     // Empty state
@@ -193,7 +208,6 @@ PopupWindow {
 
                     Repeater {
                         model: root.notifyServer.trackedNotifications
-
                         delegate: Notification {
                             required property var modelData
                             Layout.fillWidth: true
@@ -201,7 +215,6 @@ PopupWindow {
                         }
                     }
 
-                    // Bottom breathing room
                     Item { implicitHeight: 8 }
                 }
             }
@@ -230,7 +243,9 @@ PopupWindow {
     }
 
     function close() {
-        if (!isOpen || isAnimating) return
+        if (!isOpen) return
+        // If already animating close, let it finish
+        if (isAnimating) return
         isOpen = false
         isAnimating = true
 

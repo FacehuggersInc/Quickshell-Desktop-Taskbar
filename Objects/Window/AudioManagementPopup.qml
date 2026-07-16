@@ -57,7 +57,14 @@ PopupWindow {
         id: focusGrab
         active: false
         windows: [ volumeSettingsPopup ]
-        onCleared: volumeSettingsPopup.forceClose()
+        onCleared: {
+            alphaAnim.stop()
+            volumeSettingsPopup.isClosing = false
+            volumeSettingsPopup.visible = false
+            background.opacity = 0
+        currentlyPlayingUpdater.running = false
+        currentlyPlayingUpdater.repeat = false
+        }
     }
 
     Timer {

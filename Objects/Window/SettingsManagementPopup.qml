@@ -129,8 +129,7 @@ PopupWindow {
     }
 
     function fetchBrightness() {
-        if (!detectProc.running)        detectProc.running = true
-        if (!brightnessGetProc.running) brightnessGetProc.running = true
+        if (!settingsOpenBatchProc.running) settingsOpenBatchProc.running = true
     }
 
     function setBrightness(displayNum, value) {
@@ -218,7 +217,53 @@ PopupWindow {
         id: focusGrab
         active: false
         windows: [ generalSettingsPopup ]
-        onCleared: generalSettingsPopup.forceClose()
+        onCleared: {
+            // Immediately hide — don't wait for animation
+            // Focus loss from launching an app (USB button, terminal etc.)
+            // should close the panel instantly
+            alphaAnim.stop()
+            generalSettingsPopup.visible = false
+            generalSettingsPopup.isClosing = false
+            background.opacity = 0
+            usbRefreshTimer.stop()
+        }
+    }
+
+    // Batch proc for settings open — ddcdetect + ddcgetbrightness in one call
+    Process {
+        id: settingsOpenBatchProc
+        command: root.newBatch([["ddcdetect"], ["ddcgetbrightness"]])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var results = root.parseBatch(this.text)
+
+                // ddcdetect
+                if (results["ddcdetect"]) {
+                    var parts = results["ddcdetect"].split("|")
+                    var names = []
+                    for (var i = 0; i < parts.length; i++) {
+                        var kv = parts[i].split(":")
+                        if (kv.length >= 2) names.push(kv.slice(1).join(":").trim())
+                    }
+                    generalSettingsPopup.displayNames = names
+                }
+
+                // ddcgetbrightness
+                if (results["ddcgetbrightness"]) {
+                    var displays = results["ddcgetbrightness"].split("|")
+                    var vals = []
+                    for (var j = 0; j < displays.length; j++) {
+                        var dp = displays[j].split(":")
+                        if (dp.length < 3) { vals.push(50); continue }
+                        var cur = parseInt(dp[1])
+                        var max = parseInt(dp[2])
+                        vals.push(max > 0 ? Math.round((cur / max) * 100) : 50)
+                    }
+                    if (!generalSettingsPopup.brightnessBeingDragged)
+                        generalSettingsPopup.brightnessValues = vals
+                }
+            }
+        }
     }
 
     // ── Reusable full-width action row ────────────────────────────
@@ -838,6 +883,8 @@ PopupWindow {
 
                 }  // end cycling-on ColumnLayout
 
+                Item { implicitHeight: 8 }
+
                 // ── DISPLAY ───────────────────────────────────────
                 TextDivider {
                     dividerText: "Display"
@@ -990,6 +1037,315 @@ PopupWindow {
                     }
                 }
 
+
+                // Primary monitor picker
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    IconButton {
+                        iconName: "show"
+                        iconSize: 20
+                        color: root.settings.theme.primary
+                        opacity: 0.7
+                        tooltipText: "Primary display"
+                    }
+
+                    Text {
+                        text: "Primary Display"
+                        color: root.settings.theme.text
+                        font.family: root.settings.fontFamily
+                        font.weight: 500
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+
+                    Row {
+                        spacing: 4
+                        Repeater {
+                            model: root.settings.displays || []
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                property bool isSelected: index === (root.settings.primaryDisplayIndex || 0)
+                                width:  primaryLabel.implicitWidth + 16
+                                height: 26
+                                radius: 6
+                                color: isSelected ? root.settings.theme.primary : root.settings.theme.surface
+                                opacity: isSelected ? 0.9 : 0.5
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Text {
+                                    id: primaryLabel
+                                    anchors.centerIn: parent
+                                    text: modelData
+                                    color: root.settings.theme.text
+                                    font.family: root.settings.fontFamily
+                                    font.pixelSize: 11
+                                    font.weight: isSelected ? 700 : 400
+                                }
+                                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        root.settings.primaryDisplayIndex = index
+                                        root.saveSettings()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Refresh displays from Hyprland
+                ActionRow {
+                    iconName: "refresh"
+                    label: "Refresh Displays"
+                    description: "Re-detect from Hyprland"
+                    onClicked: {
+                        if (!startupBatchProc.running) startupBatchProc.running = true
+                    }
+                }
+
+                Item { implicitHeight: 8 }
+
+                // ── THEATER ───────────────────────────────────────
+                TextDivider {
+                    dividerText: "Theater"
+                    dividerHeight: 2
+                    Layout.fillWidth: true
+                }
+
+                // Theater mode toggle
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    IconButton {
+                        iconName: root.theaterMode ? "hide" : "show"
+                        iconSize: 20
+                        color: root.settings.theme.primary
+                        opacity: root.theaterMode ? 1.0 : 0.45
+                        tooltipText: "Theater Mode"
+                        onClicked: root.setTheaterMode(!root.theaterMode)
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Text {
+                            text: "Theater Mode"
+                            color: root.settings.theme.text
+                            font.family: root.settings.fontFamily
+                            font.weight: 500
+                            font.pixelSize: 14
+                        }
+                        Text {
+                            text: root.theaterMode
+                                ? "Non-primary displays dimmed"
+                                : "Dims non-primary displays to " + (root.settings.theater ? root.settings.theater.dimBrightness || 10 : 10) + "%"
+                            color: root.settings.theme.text
+                            opacity: 0.45
+                            font.family: root.settings.fontFamily
+                            font.pixelSize: 11
+                        }
+                    }
+
+                    Rectangle {
+                        width: 44; height: 24; radius: 12
+                        color: root.theaterMode ? root.settings.theme.primary : Qt.rgba(1,1,1,0.15)
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                        Rectangle {
+                            width: 18; height: 18; radius: 9
+                            color: root.settings.theme.text
+                            anchors.verticalCenter: parent.verticalCenter
+                            x: root.theaterMode ? parent.width - width - 3 : 3
+                            Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.InOutQuad } }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.setTheaterMode(!root.theaterMode)
+                        }
+                    }
+                }
+
+                // Dim brightness slider
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    IconButton {
+                        iconName: "backlight_low"
+                        iconSize: 20
+                        color: root.settings.theme.primary
+                        opacity: 0.7
+                        tooltipText: "Dim brightness"
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Text {
+                            text: "Dim Brightness"
+                            color: root.settings.theme.text
+                            opacity: 0.55
+                            font.family: root.settings.fontFamily
+                            font.pixelSize: 11
+                        }
+                        CustomSlider {
+                            id: theaterDimSlider
+                            Layout.fillWidth: true
+                            from: 0; to: 50; stepSize: 1
+                            handleBorderWidth: 0
+                            Binding {
+                                target: theaterDimSlider
+                                property: "value"
+                                value: root.settings.theater ? root.settings.theater.dimBrightness || 10 : 10
+                                when: !theaterDimSlider.pressed
+                            }
+                            onMoved: {
+                                if (!root.settings.theater) root.settings.theater = {}
+                                root.settings.theater.dimBrightness = Math.round(this.value)
+                                root.saveSettings()
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: Math.round(theaterDimSlider.value) + "%"
+                        color: root.settings.theme.text
+                        font.family: root.settings.fontFamily
+                        font.weight: 500
+                        font.pixelSize: 13
+                        Layout.preferredWidth: 38
+                    }
+                }
+
+                // Theater wallpaper path
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    IconButton {
+                        iconName: "wallpaper"
+                        iconSize: 20
+                        color: root.settings.theme.primary
+                        opacity: 0.7
+                        tooltipText: "Theater wallpaper"
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Text {
+                            text: "Theater Wallpaper"
+                            color: root.settings.theme.text
+                            opacity: 0.55
+                            font.family: root.settings.fontFamily
+                            font.pixelSize: 11
+                        }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 32
+                            radius: 6
+                            color: root.settings.theme.surface
+                            border.color: theaterWallpaperField.activeFocus
+                                ? root.settings.theme.primary : "transparent"
+                            border.width: 1
+                            TextField {
+                                id: theaterWallpaperField
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                placeholderText: "/path/to/dark/wallpaper.jpg"
+                                text: root.settings.theater ? root.settings.theater.wallpaper || "" : ""
+                                color: root.settings.theme.text
+                                font.family: root.settings.fontFamily
+                                font.pixelSize: 12
+                                background: Item {}
+                                onAccepted: {
+                                    if (!root.settings.theater) root.settings.theater = {}
+                                    root.settings.theater.wallpaper = text.trim()
+                                    root.saveSettings()
+                                }
+                                onActiveFocusChanged: {
+                                    if (!activeFocus) {
+                                        if (!root.settings.theater) root.settings.theater = {}
+                                        root.settings.theater.wallpaper = text.trim()
+                                        root.saveSettings()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Theater primary display picker
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    IconButton {
+                        iconName: "show"
+                        iconSize: 20
+                        color: root.settings.theme.primary
+                        opacity: 0.7
+                        tooltipText: "Primary display"
+                    }
+
+                    Text {
+                        text: "Primary Display"
+                        color: root.settings.theme.text
+                        font.family: root.settings.fontFamily
+                        font.weight: 500
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                    }
+
+                    Row {
+                        spacing: 4
+                        Repeater {
+                            model: root.settings.displays || []
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                property bool isSelected: {
+                                    var t = root.settings.theater
+                                    var p = t && t.primaryDisplay !== undefined && t.primaryDisplay !== null
+                                        ? t.primaryDisplay
+                                        : (root.settings.primaryDisplayIndex || 0)
+                                    return index === p
+                                }
+                                width:  theaterDisplayLabel.implicitWidth + 16
+                                height: 26
+                                radius: 6
+                                color: isSelected ? root.settings.theme.primary : root.settings.theme.surface
+                                opacity: isSelected ? 0.9 : 0.5
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Text {
+                                    id: theaterDisplayLabel
+                                    anchors.centerIn: parent
+                                    text: modelData
+                                    color: root.settings.theme.text
+                                    font.family: root.settings.fontFamily
+                                    font.pixelSize: 11
+                                    font.weight: isSelected ? 700 : 400
+                                }
+                                HoverHandler { cursorShape: Qt.PointingHandCursor }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        if (!root.settings.theater) root.settings.theater = {}
+                                        root.settings.theater.primaryDisplay = index
+                                        root.saveSettings()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Item { implicitHeight: 8 }
+
                 // ── QUICK ACCESS ──────────────────────────────────
                 TextDivider {
                     dividerText: "Quick Access"
@@ -1043,6 +1399,8 @@ PopupWindow {
                 }
 
 
+                Item { implicitHeight: 8 }
+
                 // ── CONFIGURATIONS ────────────────────────────────
                 TextDivider {
                     dividerText: "Configurations"
@@ -1080,6 +1438,8 @@ PopupWindow {
                     onClicked: root.execute(root.cmd("hypr_reload"))
                 }
 
+                Item { implicitHeight: 8 }
+
                 // ── HYPRLAND ──────────────────────────────────────
                 TextDivider {
                     dividerText: "Hyprland"
@@ -1109,6 +1469,8 @@ PopupWindow {
                     }
                 }
 
+
+                Item { implicitHeight: 8 }
 
                 // ── POWER ─────────────────────────────────────────
                 TextDivider {
@@ -1140,6 +1502,8 @@ PopupWindow {
                     description: root.cmdDesc("poweroff")
                     onClicked: root.execute(root.cmd("poweroff"))
                 }
+
+                Item { implicitHeight: 8 }
 
                 // ── DEBUG ─────────────────────────────────────────
                 TextDivider {

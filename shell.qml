@@ -27,27 +27,192 @@ ShellRoot {
     property var utill: ["python3", "/home/fach/.config/quickshell/Scripts/utill.py"]
     property bool initialDarkHourCheck: false
     property var monitorResolutions: ({})  // name -> {w, h}
+    property var ddcMap: ({})              // connector name -> DDC display number
+    property var monitorInfos: []          // full monitor info sorted left-to-right
 
-    // Fetch monitor resolutions once on startup
+    // ── Startup batch — replaces separate monitorResProc, detectDisplaysProc, ddcMappingProc
     Process {
-        id: monitorResProc
-        command: root.newUtill(["--getmonitorres"])
+        id: startupBatchProc
+        command: root.newBatch([
+            ["getmonitorres"],
+            ["getdisplays"],
+            ["ddcmapping"]
+        ])
         running: true
         stdout: StdioCollector {
             onStreamFinished: {
-                var text = this.text.trim()
-                if (!text) return
-                var res = {}
-                text.split("|").forEach(function(entry) {
-                    var parts = entry.split(":")
-                    if (parts.length >= 3) {
-                        res[parts[0]] = { w: parseInt(parts[1]), h: parseInt(parts[2]) }
+                var results = root.parseBatch(this.text)
+
+                // getmonitorres
+                if (results["getmonitorres"]) {
+                    var res = {}
+                    results["getmonitorres"].split("|").forEach(function(entry) {
+                        var parts = entry.split(":")
+                        if (parts.length >= 3)
+                            res[parts[0]] = { w: parseInt(parts[1]), h: parseInt(parts[2]) }
+                    })
+                    root.monitorResolutions = res
+                }
+
+                // getdisplays
+                if (results["getdisplays"] && results["getdisplays"] !== "none") {
+                    var names = []
+                    var infos = []
+                    var focusedIdx = 0
+                    results["getdisplays"].split("\n").forEach(function(line, i) {
+                        var parts = line.split("|")
+                        if (parts.length < 7) return
+                        names.push(parts[0])
+                        infos.push({
+                            name: parts[0], w: parseInt(parts[1]), h: parseInt(parts[2]),
+                            x: parseInt(parts[3]), y: parseInt(parts[4]),
+                            focused: parts[5] === "yes", transform: parseInt(parts[6])
+                        })
+                        if (parts[5] === "yes") focusedIdx = i
+                    })
+                    root.monitorInfos = infos
+
+                    var current = root.settings.displays || []
+                    var changed = names.length !== current.length
+                    if (!changed) {
+                        for (var j = 0; j < names.length; j++) {
+                            if (names[j] !== current[j]) { changed = true; break }
+                        }
                     }
-                })
-                root.monitorResolutions = res
+                    if (changed) {
+                        root.settings.displays = names
+                        if (root.settings.primaryDisplayIndex === undefined
+                                || root.settings.primaryDisplayIndex === null) {
+                            root.settings.primaryDisplayIndex = focusedIdx
+                        }
+                        root.saveSettings()
+                    }
+                }
+
+                // ddcmapping
+                if (results["ddcmapping"] && results["ddcmapping"] !== "none") {
+                    var map = {}
+                    results["ddcmapping"].split("|").forEach(function(entry) {
+                        var parts = entry.split(":")
+                        if (parts.length >= 2) map[parts[0]] = parseInt(parts[1])
+                    })
+                    root.ddcMap = map
+                }
             }
         }
     }
+
+    // Theater mode
+    property bool theaterMode: false
+    property var theaterPrevBrightness: []
+
+    // Reads current brightness before dimming for theater mode restore
+    Process {
+        id: theaterBrightnessProc
+        command: root.newUtill(["--ddcgetbrightness"])
+        property int pendingDim: 10
+        property int pendingPrimary: 0
+        property string pendingWallpaper: ""
+        stdout: StdioCollector {
+            onStreamFinished: {
+                // Parse current brightness values
+                var displays = this.text.trim().split("|")
+                var vals = []
+                for (var i = 0; i < displays.length; i++) {
+                    var parts = displays[i].split(":")
+                    if (parts.length < 3) { vals.push(50); continue }
+                    var cur = parseInt(parts[1])
+                    var max = parseInt(parts[2])
+                    vals.push(max > 0 ? Math.round((cur / max) * 100) : 50)
+                }
+                root.theaterPrevBrightness = vals
+
+                // pendingPrimary -1 means read-only — just store values, don't dim
+                if (theaterBrightnessProc.pendingPrimary === -1) return
+
+                var primary = theaterBrightnessProc.pendingPrimary
+                var dim     = theaterBrightnessProc.pendingDim
+                var wp      = theaterBrightnessProc.pendingWallpaper
+
+                var rawCmd = (root.settings.commands && root.settings.commands.wallpaper_set)
+                    || "awww img -o {display} {wallpaper}"
+
+                for (var j = 0; j < root.settings.displays.length; j++) {
+                    if (j !== primary) {
+                        var connector = root.settings.displays[j]
+                        var ddcNum = root.ddcMap[connector] || (j + 1)
+                        root.execute(root.newUtill(["--ddcsetbrightness", ddcNum, dim]))
+                        if (wp !== "") {
+                            var wallpaperCmd = rawCmd
+                                .replace("{display}", connector)
+                                .replace("{wallpaper}", wp)
+                            root.execute(wallpaperCmd.split(" "))
+                        }
+                    }
+                }
+
+                root.theaterMode = true
+                root.settings.theater.enabled = true
+                // Stop wallpaper cycling while theater is active
+                wallpaperSwitchTimer.running = false
+                root.saveSettings()
+            }
+        }
+    }
+
+    function setTheaterMode(on) {
+        var theater = settings.theater || {}
+        var primary = (theater.primaryDisplay !== undefined && theater.primaryDisplay !== null)
+            ? theater.primaryDisplay
+            : (settings.primaryDisplayIndex || 0)
+        var dimBrightness  = theater.dimBrightness !== undefined ? theater.dimBrightness : 10
+        var theaterWallpaper = theater.wallpaper || ""
+
+        if (on) {
+            // Read current brightness first, then dim in the proc callback
+            theaterBrightnessProc.pendingDim      = dimBrightness
+            theaterBrightnessProc.pendingPrimary  = primary
+            theaterBrightnessProc.pendingWallpaper = theaterWallpaper
+            theaterBrightnessProc.running = true
+        } else {
+            // Restore brightness on non-primary displays using correct DDC numbers
+            for (var k = 0; k < settings.displays.length; k++) {
+                if (k !== primary) {
+                    var restoreConnector = settings.displays[k]
+                    var restoreDdc = root.ddcMap[restoreConnector] || (k + 1)
+                    root.execute(root.newUtill(["--ddcsetbrightness", restoreDdc, theaterPrevBrightness[k] || 50]))
+                }
+            }
+            root.nextWallpaper()
+            // Resume cycling if it was enabled
+            if (root.settings.wallpapers.cycling !== false) {
+                wallpaperSwitchTimer.running = true
+            }
+            theaterMode = false
+            settings.theater = settings.theater || {}
+            settings.theater.enabled = false
+            root.saveSettings()
+        }
+    }
+
+    Component.onCompleted: {
+        // Reset theater mode if it was left on from previous session
+        var theater = settings.theater || {}
+        if (theater.enabled === true) {
+            settings.theater.enabled = false
+            root.saveSettings()
+            // Restore cycling if it should be running
+            if (root.settings.wallpapers.cycling !== false) {
+                wallpaperSwitchTimer.running = true
+            }
+            // Re-fetch brightness so sliders reflect actual state after reset
+            theaterBrightnessProc.pendingDim       = 100  // restore all to full
+            theaterBrightnessProc.pendingPrimary   = -1   // -1 = skip dimming, just read
+            theaterBrightnessProc.pendingWallpaper = ""
+            theaterBrightnessProc.running = true
+        }
+    }
+
     // wallpaperMode: 0=auto (follow dark hours), 1=force day, 2=force night
     property int wallpaperMode: root.settings.wallpapers.wallpaperMode || 0
 
@@ -169,6 +334,36 @@ ShellRoot {
     function newUtill(args){
         return combine(root.utill, args);
     }
+
+    function newBatch(commands) {
+        // commands: [["funcname", arg1, arg2], ["funcname2"]]
+        // Returns: combine(utill, ["--batch", "-funcname", arg1, "-funcname2"])
+        var batchArgs = ["--batch"]
+        for (var i = 0; i < commands.length; i++) {
+            var parts = commands[i]
+            batchArgs.push("-" + parts[0])
+            for (var j = 1; j < parts.length; j++) {
+                batchArgs.push(String(parts[j]))
+            }
+        }
+        return combine(root.utill, batchArgs)
+    }
+
+    // parseBatch() — parse batch result into a map of {funcname: result}
+    function parseBatch(text) {
+        var map = {}
+        var lines = text.trim().split("\n")
+        for (var i = 0; i < lines.length; i++) {
+            var idx = lines[i].indexOf(":")
+            if (idx === -1) continue
+            var key = lines[i].substring(0, idx)
+            var val = lines[i].substring(idx + 1)
+            map[key] = val
+        }
+        return map
+    }
+
+
 
     function iconSource(name){
         return settings.iconsPath + name + ".png"
@@ -402,6 +597,40 @@ ShellRoot {
         }
     }
 
+    // Portrait wallpaper proc — picks and sets a wallpaper from the portrait folder
+    Process {
+        id: portraitWallpaperProc
+        property string display: ""
+        property int    displayIdx: 0
+        property string rawCmd: ""
+
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var wallpaper = this.text.trim().split(",")[0].trim()
+                if (!wallpaper) return
+
+                var finalWallpaper = wallpaper
+
+                // Apply smart crop if enabled
+                if (root.settings.wallpapers.smartCrop) {
+                    var monRes = root.monitorResolutions[portraitWallpaperProc.display]
+                    if (monRes && monRes.h > monRes.w) {
+                        smartCropProc.wallpaper   = wallpaper
+                        smartCropProc.monW        = monRes.w
+                        smartCropProc.monH        = monRes.h
+                        smartCropProc.displayName = portraitWallpaperProc.display
+                        smartCropProc.rawCommand  = portraitWallpaperProc.rawCmd
+                        smartCropProc.running     = true
+                        return
+                    }
+                }
+
+                var cmd = portraitWallpaperProc.rawCmd.replace("{wallpaper}", finalWallpaper)
+                root.execute(cmd.split(" "))
+            }
+        }
+    }
+
     // -- THEME
     Timer{
         id: themeCheckTimer
@@ -480,6 +709,19 @@ ShellRoot {
                         wallpaper = wallpapers[i].trim()
                     } else {
                         wallpaper = wallpapers[0].trim()
+                    }
+
+                    // Portrait monitor — use portrait wallpaper folder if configured
+                    var monRes = root.monitorResolutions[settings.displays[i]]
+                    if (monRes && monRes.h > monRes.w
+                            && settings.wallpapers.randomWallpaperPerDisplay
+                            && settings.wallpapers.portraitFolder) {
+                        portraitWallpaperProc.display    = settings.displays[i]
+                        portraitWallpaperProc.displayIdx = i
+                        portraitWallpaperProc.rawCmd     = rawCommand.replace("{display}", settings.displays[i])
+                        portraitWallpaperProc.command    = root.newUtill(["--randomfile", settings.wallpapers.portraitFolder])
+                        portraitWallpaperProc.running    = true
+                        continue  // handled by portraitWallpaperProc
                     }
 
                     // Smart crop for vertical monitors if setting enabled

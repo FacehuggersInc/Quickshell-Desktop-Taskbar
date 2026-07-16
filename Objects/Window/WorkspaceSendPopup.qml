@@ -57,7 +57,14 @@ PopupWindow {
         id: focusGrab
         active: false
         windows: [ workspaceSendPopup ]
-        onCleared: workspaceSendPopup.forceClose()
+        onCleared: {
+            alphaAnim.stop()
+            workspaceSendPopup.isClosing = false
+            workspaceSendPopup.visible = false
+            background.opacity = 0
+        targetPid = ""
+        targetClass = ""
+        }
     }
 
     Process {

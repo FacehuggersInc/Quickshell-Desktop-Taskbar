@@ -49,7 +49,12 @@ PopupWindow {
         id: focusGrab
         active: false
         windows: [ colorHistoryPopup ]
-        onCleared: colorHistoryPopup.forceClose()
+        onCleared: {
+            alphaAnim.stop()
+            colorHistoryPopup.isClosing = false
+            colorHistoryPopup.visible = false
+            background.opacity = 0
+        }
     }
 
     // Process lives outside Rectangle so it doesn't affect layout

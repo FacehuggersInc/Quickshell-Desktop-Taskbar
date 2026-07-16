@@ -719,6 +719,81 @@ class Utill():
     # ── DDC / DISPLAY BRIGHTNESS ─────────────────────────────────────────────
 
     @argfunc
+    def getdisplays(self, *args):
+        """Returns all connected monitors from Hyprland.
+        Returns newline-separated: name|width|height|x|y|focused|transform
+        e.g. HDMI-A-1|2560|1440|0|0|yes|0
+        """
+        result = subprocess.run(
+            ["hyprctl", "monitors", "-j"],
+            capture_output=True, text=True
+        )
+        try:
+            monitors = json.loads(result.stdout.strip())
+            lines = []
+            for m in monitors:
+                name      = m.get("name", "")
+                w         = m.get("width",  0)
+                h         = m.get("height", 0)
+                x         = m.get("x", 0)
+                y         = m.get("y", 0)
+                focused   = "yes" if m.get("focused", False) else "no"
+                transform = m.get("transform", 0)
+                # Account for 90/270 rotation
+                if transform in [1, 3, 5, 7]:
+                    w, h = h, w
+                lines.append(f"{name}|{w}|{h}|{x}|{y}|{focused}|{transform}")
+            # Sort left to right by x position
+            lines.sort(key=lambda l: int(l.split("|")[3]))
+            return "\n".join(lines) if lines else "none"
+        except Exception:
+            return "none"
+
+    @argfunc
+    def ddcmapping(self, *args):
+        """Returns DDC display number to connector name mapping.
+        Parses 'ddcutil detect' output to map DDC num -> connector name.
+        Returns: connector:ddcnum|connector:ddcnum|...
+        e.g. HDMI-A-1:1|DP-1:2|DP-2:3
+        """
+        result = subprocess.run(
+            ["ddcutil", "detect"],
+            capture_output=True, text=True, timeout=10
+        )
+
+        mapping = {}
+        current_num = None
+        current_connector = None
+
+        for line in result.stdout.splitlines():
+            ls = line.strip()
+
+            if ls.startswith("Display "):
+                # Save previous
+                if current_num is not None and current_connector is not None:
+                    mapping[current_connector] = current_num
+                try:
+                    current_num = int(ls.split()[1])
+                except:
+                    current_num = None
+                current_connector = None
+
+            elif "DRM_connector:" in ls and current_num is not None:
+                # Format: "DRM_connector:  card1-HDMI-A-1"
+                parts = ls.split("DRM_connector:")
+                if len(parts) >= 2:
+                    # Strip "card1-" or "card0-" prefix
+                    connector = parts[1].strip()
+                    connector = re.sub(r"^card\d+-", "", connector)
+                    current_connector = connector
+
+        # Save last
+        if current_num is not None and current_connector is not None:
+            mapping[current_connector] = current_num
+
+        return "|".join([f"{conn}:{num}" for conn, num in mapping.items()]) if mapping else "none"
+
+    @argfunc
     def ddcdetect(self, *args):
         result = subprocess.run(["ddcutil", "detect"], capture_output=True, text=True, timeout=10)
         displays, current_num, current_name = [], None, None
@@ -1106,7 +1181,54 @@ class Utill():
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    cmd  = args[0]
+    if not args:
+        post("Error: lacking --cmd <args>")
+        sys.exit(1)
+
+    cmd = args[0]
+
+    # ── Batch mode ───────────────────────────────────────────────────────────
+    # Usage: --batch -func1 arg1 arg2 -func2 arg1
+    # Each -funcname starts a new command; args follow until the next -funcname
+    # Returns one line per command: funcname:result
+    if cmd == "--batch":
+        utill = Utill()
+        # Parse: split on tokens starting with "-" (single dash = command name)
+        commands = []   # list of (funcname, [args])
+        current_func = None
+        current_args = []
+        for token in args[1:]:
+            if token.startswith("-") and not token.startswith("--"):
+                if current_func is not None:
+                    commands.append((current_func, current_args))
+                current_func = token[1:]  # strip leading -
+                current_args = []
+            else:
+                if current_func is not None:
+                    current_args.append(token)
+        if current_func is not None:
+            commands.append((current_func, current_args))
+
+        results = []
+        for func, fargs in commands:
+            try:
+                result = utill.call(func, *fargs)
+                if result is None:
+                    result = ""
+                elif isinstance(result, (list, tuple)):
+                    result = ','.join([str(v) for v in result])
+                elif isinstance(result, dict):
+                    result = ','.join([f"{k}:{v}" for k, v in result.items()])
+                else:
+                    result = str(result)
+                results.append(f"{func}:{result}")
+            except Exception as e:
+                results.append(f"{func}:error:{e}")
+
+        post("\n".join(results))
+        sys.exit(0)
+
+    # ── Single command mode ───────────────────────────────────────────────────
     if cmd:
         raw = False
         newline = None

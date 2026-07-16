@@ -224,6 +224,8 @@ The table below documents what the shell is actually doing in the background. Th
 | `--clearcolors` | Called on the clear button in the color history popup |
 | `--usbmountcheck` | Called when a USB hotplug event fires — checks if the partition is mounted and mounts it via `udisksctl` if not |
 | `--generatetheme` | Called when `autoTheme` is enabled — builds a full color theme from seed colors extracted from the current wallpaper |
+| `--getdisplays` | Called once on startup — reads all monitors from `hyprctl monitors -j`, sorts left-to-right by x position, and auto-updates `settings.displays` if the connected monitors have changed |
+| `--ddcmapping` | Called once on startup — maps DDC display numbers to connector names so brightness commands target the correct physical monitor |
 
 **Python packages required** by this file:
 
@@ -241,8 +243,8 @@ If you have not yet created `config.json` see [Installation](#4-installation) ab
 
 ```json
 {
-    "displays":            ["DP-1", "HDMI-A-1"], // required if cycling — connector names, left to right
-    "primaryDisplayIndex": 0,                    // required if cycling — used for theme/color sampling
+    "displays":            ["DP-1", "HDMI-A-1"], // auto-populated from Hyprland on startup
+    "primaryDisplayIndex": 0,                    // auto-set to focused monitor on first run — change in Display settings
     "wallpapers": {
         "cycling":            true,              // set false to skip all wallpaper handling
         "day":        "/path/to/day/",           // required if cycling — trailing slash needed
@@ -250,6 +252,7 @@ If you have not yet created `config.json` see [Installation](#4-installation) ab
         "interval":   600000,                    // ms between wallpaper changes
         "randomWallpaperPerDisplay": true,       // different wallpaper per display
         "smartCrop":      false,                 // auto-crop for vertical monitors
+        "portraitFolder": "",                    // optional — portrait wallpapers preferred on vertical monitors
         "wallpaperMode":  0,                     // 0=auto, 1=force day, 2=force night
         "autoTheme":      false,                 // generate theme from current wallpaper
         "darkModeHours": {
@@ -294,6 +297,13 @@ If you have not yet created `config.json` see [Installation](#4-installation) ab
     },
 
     "colorHistory": [],
+    "forceDarkMode":   false,
+    "theater": {
+        "enabled":        false,         // reset to false on startup automatically
+        "primaryDisplay": null,          // index into displays — defaults to primaryDisplayIndex if null
+        "dimBrightness":  10,            // brightness % for non-primary displays in theater mode (0-50)
+        "wallpaper":      ""             // path to wallpaper set on non-primary displays when active
+    },
     "launcherflags": {
         "maxOptions":    3,
         "filters":       {},   // class: [args to strip]
