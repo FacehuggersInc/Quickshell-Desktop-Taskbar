@@ -81,8 +81,7 @@ ShellRoot {
                     }
                     if (changed) {
                         root.settings.displays = names
-                        if (root.settings.primaryDisplayIndex === undefined
-                                || root.settings.primaryDisplayIndex === null) {
+                        if (root.settings.primaryDisplayIndex === undefined || root.settings.primaryDisplayIndex === null) {
                             root.settings.primaryDisplayIndex = focusedIdx
                         }
                         root.saveSettings()
@@ -352,7 +351,7 @@ ShellRoot {
     // parseBatch() — parse batch result into a map of {funcname: result}
     function parseBatch(text) {
         var map = {}
-        var lines = text.trim().split("\n")
+        var lines = text.trim().split(" BATCHED ")
         for (var i = 0; i < lines.length; i++) {
             var idx = lines[i].indexOf(":")
             if (idx === -1) continue
@@ -392,12 +391,12 @@ ShellRoot {
         // wallpaperMode overrides the hour check
         if (root.wallpaperMode === 1) {
             wallpaperRandomChoice.wallpaperFolder = settings.wallpapers.day
-            wallpaperRandomChoice.running = true
+            launchWallpaperProc()
             return
         }
         if (root.wallpaperMode === 2) {
             wallpaperRandomChoice.wallpaperFolder = settings.wallpapers.night
-            wallpaperRandomChoice.running = true
+            launchWallpaperProc()
             return
         }
 
@@ -407,6 +406,13 @@ ShellRoot {
         } else {
             wallpaperRandomChoice.wallpaperFolder = settings.wallpapers.day
         }
+        launchWallpaperProc()
+    }
+
+    function launchWallpaperProc() {
+        var count = (settings.wallpapers.randomWallpaperPerDisplay && settings.displays && settings.displays.length > 0)
+            ? settings.displays.length : 1
+        wallpaperRandomChoice.command = root.newUtill(["--randomfile", wallpaperRandomChoice.wallpaperFolder, count])
         wallpaperRandomChoice.running = true
     }
 
@@ -688,37 +694,32 @@ ShellRoot {
     }
     Process{
         id: wallpaperRandomChoice
-        property string wallpaperFolder: settings.wallpapers.day; 
-        property int wallpapersToGet: settings.wallpapers.randomWallpaperPerDisplay ? settings.displays.length : 1
-        command: newUtill( ["--randomfile", wallpaperRandomChoice.wallpaperFolder, wallpaperRandomChoice.wallpapersToGet] )
+        property string wallpaperFolder: settings.wallpapers.day
         stdout : StdioCollector {
             onStreamFinished: {
-                
-                var wallpapers = this.text.split(",")
+                var wallpapers = this.text.trim().split(",")
                 var rawCommand = (settings.commands && settings.commands.wallpaper_set)
                     || settings.wallpapers.setWallpaperCommand
                     || "awww img -o {display} {wallpaper}"
                 var setWallpaperCommand = rawCommand
                 for (var i = 0; i < settings.displays.length; i++) {
-                    setWallpaperCommand = rawCommand
-                    
-                    setWallpaperCommand = setWallpaperCommand.replace( "{display}", settings.displays[i] )
+                    var display = settings.displays[i]
 
                     var wallpaper = null
                     if (settings.wallpapers.randomWallpaperPerDisplay) {
-                        wallpaper = wallpapers[i].trim()
+                        wallpaper = wallpapers[i] ? wallpapers[i].trim() : wallpapers[0].trim()
                     } else {
                         wallpaper = wallpapers[0].trim()
                     }
 
                     // Portrait monitor — use portrait wallpaper folder if configured
-                    var monRes = root.monitorResolutions[settings.displays[i]]
+                    var monRes = root.monitorResolutions[display]
                     if (monRes && monRes.h > monRes.w
                             && settings.wallpapers.randomWallpaperPerDisplay
                             && settings.wallpapers.portraitFolder) {
-                        portraitWallpaperProc.display    = settings.displays[i]
+                        portraitWallpaperProc.display    = display
                         portraitWallpaperProc.displayIdx = i
-                        portraitWallpaperProc.rawCmd     = rawCommand.replace("{display}", settings.displays[i])
+                        portraitWallpaperProc.rawCmd     = rawCommand.replace("{display}", display)
                         portraitWallpaperProc.command    = root.newUtill(["--randomfile", settings.wallpapers.portraitFolder])
                         portraitWallpaperProc.running    = true
                         continue  // handled by portraitWallpaperProc
@@ -726,29 +727,21 @@ ShellRoot {
 
                     // Smart crop for vertical monitors if setting enabled
                     var finalWallpaper = wallpaper
-                    if (settings.wallpapers.smartCrop) {
-                        var displayName = settings.displays[i]
-                        var monRes = root.monitorResolutions[displayName]
-                        if (monRes && monRes.h > monRes.w) {
-                            // Vertical monitor — run smartcrop synchronously via proc
-                            // We use a blocking call pattern here by launching the command
-                            // and substituting inline. Since execDetached is async we
-                            // store the crop path and use it in a separate proc.
-                            smartCropProc.wallpaper   = wallpaper
-                            smartCropProc.monW        = monRes.w
-                            smartCropProc.monH        = monRes.h
-                            smartCropProc.displayName = displayName
-                            smartCropProc.rawCommand  = setWallpaperCommand
-                                .replace("{display}", settings.displays[i])
-                            smartCropProc.running     = true
-                            continue  // handled by smartCropProc
-                        }
+                    if (settings.wallpapers.smartCrop && monRes && monRes.h > monRes.w) {
+                        console.log("Test")
+                        smartCropProc.wallpaper   = wallpaper
+                        smartCropProc.monW        = monRes.w
+                        smartCropProc.monH        = monRes.h
+                        smartCropProc.displayName = display
+                        smartCropProc.rawCommand  = rawCommand.replace("{display}", display)
+                        smartCropProc.running     = true
+                        continue  // handled by smartCropProc
                     }
 
-                    var wallpaperCmd = setWallpaperCommand
-                        .replace("{display}", settings.displays[i])
+                    var wallpaperCmd = rawCommand
+                        .replace("{display}", display)
                         .replace("{wallpaper}", finalWallpaper)
-                    execute( wallpaperCmd.split(" ") )
+                    execute(wallpaperCmd.split(" "))
                 }
                 
                 root.wallpaperColors.source = Qt.resolvedUrl(wallpapers[settings.primaryDisplayIndex].trim())

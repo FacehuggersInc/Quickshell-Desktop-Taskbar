@@ -1225,7 +1225,7 @@ if __name__ == "__main__":
             except Exception as e:
                 results.append(f"{func}:error:{e}")
 
-        post("\n".join(results))
+        post(" BATCHED ".join(results))
         sys.exit(0)
 
     # ── Single command mode ───────────────────────────────────────────────────

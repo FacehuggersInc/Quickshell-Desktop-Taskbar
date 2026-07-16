@@ -1534,7 +1534,7 @@ PopupWindow {
             alphaAnim.stop()
             isClosing = false
         }
-        updatePosition(widget)
+        updatePosition(widget) 
         background.opacity = 0
         generalSettingsPopup.visible = true
         alphaAnim.from = 0
