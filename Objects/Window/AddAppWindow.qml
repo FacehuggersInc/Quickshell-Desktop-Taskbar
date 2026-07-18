@@ -49,7 +49,7 @@ Window {
         }
     }
 
-    function openExisting() { mode = "existing"; visible = true }
+    function openExisting() { mode = "existing"; visible = true; existingView.refresh() }
     function openCustom()   { mode = "custom";   visible = true; customView.reset() }
 
     // ── Shared header ─────────────────────────────────────────────

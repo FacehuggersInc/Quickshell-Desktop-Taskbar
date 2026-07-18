@@ -82,7 +82,7 @@ PanelWindow {
                 implicitHeight: rightModules.height
             }
 
-            RoundedBlock{
+            RoundedBlock{ 
                 id: rightModules
                 
                 RowLayout {

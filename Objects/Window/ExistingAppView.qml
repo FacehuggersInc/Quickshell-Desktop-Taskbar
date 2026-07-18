@@ -51,15 +51,14 @@ Item {
         }
     }
 
-    // Re-fetch the full app list every time this view becomes visible
+    // Re-fetch the full app list — called by AddAppWindow.openExisting()
     // so that recently pinned/unpinned apps are correctly shown/hidden.
-    onVisibleChanged: {
-        if (visible) {
-            loading = true
-            allApps = []
-            filteredApps = []
-            desktopAppsProc.running = true
-        }
+    function refresh() {
+        loading = true
+        allApps = []
+        filteredApps = []
+        if (searchField.text !== "") searchField.text = ""
+        desktopAppsProc.running = true
     }
 
     function filterApps(query) {
