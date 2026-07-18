@@ -26,6 +26,19 @@ Window {
     // Callback set by AppBar before opening
     property var onSaved: null
 
+    // Writes a specific icon to the cache for a given class name
+    Process {
+        id: writeIconCacheProc
+        property string className: ""
+        property string iconName: ""
+        stdout: StdioCollector {
+            onStreamFinished: {
+                // After writing to cache, trigger icon refresh in AppBar
+                if (addAppWindow.onSaved) addAppWindow.onSaved()
+            }
+        }
+    }
+
     function openExisting() { mode = "existing"; visible = true }
     function openCustom()   { mode = "custom";   visible = true; customView.reset() }
 
@@ -72,13 +85,24 @@ Window {
     }
 
     function saveApp(name, command, icon, className, options, lockOptions, ignoreOptions, masqueUnder) {
-        // Always use "*" so getStaticApps queues the class name through
-        // getappicons — this handles both .desktop icon names and missing icons
-        // since those are system icon names, not paths in our icons folder
+        // For installed apps (icon comes from .desktop file), try to resolve
+        // the icon name to a full path and write it directly to the cache.
+        // For custom apps with no icon, fall back to "*" for auto-lookup.
+        var resolvedIcon = "*"
+        if (icon && icon !== "" && icon !== "*") {
+            // icon from .desktop is a name like "code" or a full path
+            // Write it to cache so getappicons uses it directly
+            writeIconCacheProc.className = className
+            writeIconCacheProc.iconName  = icon
+            writeIconCacheProc.command   = root.newUtill(["--setappicon", className, icon])
+            writeIconCacheProc.running   = true
+            resolvedIcon = icon
+        }
+
         var entry = {
             name:     className,
             nickname: name,
-            icon:     "*",
+            icon:     resolvedIcon,
             command:  command,
             options:  options
         }
@@ -106,8 +130,11 @@ Window {
 
         root.saveSettings()
 
-        // Notify AppBar to rebuild
-        if (onSaved) onSaved()
+        // If no icon to write, notify AppBar to rebuild immediately
+        // (if writing icon, onSaved is called from writeIconCacheProc.onStreamFinished)
+        if (resolvedIcon === "*") {
+            if (onSaved) onSaved()
+        }
 
         addAppWindow.visible = false
     }

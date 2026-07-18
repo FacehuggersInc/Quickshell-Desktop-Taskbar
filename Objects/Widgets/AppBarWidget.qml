@@ -23,6 +23,10 @@ RoundedBlock{
 
     property var queuedAppClassesForIcons: ([])
 
+    // Drag reorder state (must live here — delegates reference appBarWidget.dragSourceIndex/Target)
+    property int dragSourceIndex: -1
+    property int dragTargetIndex: -1
+
     // Args that are never meaningful to save as launch options —
     // typically DBus activation, daemon, or session-management flags
     // that only make sense when the desktop environment spawns the app.
@@ -1023,6 +1027,36 @@ RoundedBlock{
                 property int hiddenCount: model.hiddenCount
                 property string tooltipText: nickname ? nickname : name
                 property bool pinned: isAppPinned(name)
+                property int modelIndex: model.index
+
+                // Drop indicator — shows left of button when dragging over it
+                Rectangle {
+                    width: 4
+                    height: parent.height + 14
+                    anchors.left: parent.left
+                    anchors.leftMargin: -8
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: "#ffffff"
+                    visible: appBarWidget.dragTargetIndex === modelIndex
+                             && appBarWidget.dragSourceIndex !== modelIndex
+                             && appBarWidget.dragSourceIndex !== -1
+                    radius: 2
+
+                    // Glow behind the indicator for contrast on any background
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: parent.width + 6
+                        height: parent.height + 4
+                        radius: parent.radius + 3
+                        color: root.settings.theme.primary
+                        opacity: 0.6
+                        z: -1
+                    }
+                }
+
+                // Dim while being dragged
+                opacity: appBarWidget.dragSourceIndex === modelIndex ? 0.4 : 1.0
+                Behavior on opacity { NumberAnimation { duration: 120 } }
 
                 padding: 1
                 Layout.preferredWidth: 25
@@ -1039,7 +1073,87 @@ RoundedBlock{
                 MouseArea {
                     anchors.fill: parent
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
+
+                    // ── Drag reorder state ────────────────────────
+                    property bool isDragging: false
+                    property real startX: 0
+
+                    onPressed: (mouse) => {
+                        if (mouse.button === Qt.LeftButton)
+                            startX = mouse.x
+                    }
+
+                    onPositionChanged: (mouse) => {
+                        if (mouse.buttons & Qt.LeftButton) {
+                            if (!isDragging && Math.abs(mouse.x - startX) > 10) {
+                                // Only allow dragging pinned apps
+                                if (!button.pinned) return
+                                isDragging = true
+                                appBarWidget.dragSourceIndex = modelIndex
+                                tooltip.hide()
+                            }
+                            if (isDragging) {
+                                var rowX = mapToItem(row, mouse.x, 0).x
+                                var target = -1
+                                for (var i = 0; i < row.children.length; i++) {
+                                    var child = row.children[i]
+                                    if (!child || child.modelIndex === undefined) continue
+                                    // Only allow dropping onto other pinned apps
+                                    if (!child.pinned) continue
+                                    if (rowX >= child.x && rowX <= child.x + child.width) {
+                                        if (child.modelIndex !== modelIndex)
+                                            target = child.modelIndex
+                                        break
+                                    }
+                                }
+                                appBarWidget.dragTargetIndex = target
+                            }
+                        }
+                    }
+
+                    onReleased: (mouse) => {
+                        if (isDragging) {
+                            var fromIdx = appBarWidget.dragSourceIndex
+                            var toIdx   = appBarWidget.dragTargetIndex
+                            if (toIdx !== -1 && toIdx !== fromIdx) {
+                                // Grab names BEFORE moving anything
+                                var srcName = appBarWidget.apps.get(fromIdx).name
+                                var dstName = appBarWidget.apps.get(toIdx).name
+
+                                // 1. Move inside the visual ListModel (instant, no flicker)
+                                appBarWidget.apps.move(fromIdx, toIdx, 1)
+
+                                // 2. Mirror the reorder in settings.launchers for persistence
+                                var launchers = root.settings.launchers
+                                var fromL = -1
+                                var toL   = -1
+                                for (var i = 0; i < launchers.length; i++) {
+                                    if (launchers[i].name === srcName) fromL = i
+                                    if (launchers[i].name === dstName) toL   = i
+                                }
+                                if (fromL !== -1 && toL !== -1 && fromL !== toL) {
+                                    var moved = launchers.splice(fromL, 1)[0]
+                                    var insertAt = toL > fromL ? toL - 1 : toL
+                                    launchers.splice(insertAt, 0, moved)
+                                    root.saveSettings()
+                                }
+                            }
+                            isDragging = false
+                            appBarWidget.dragSourceIndex = -1
+                            appBarWidget.dragTargetIndex = -1
+                            return  // don't trigger click after drag
+                        }
+                    }
+
+                    onCanceled: {
+                        isDragging = false
+                        appBarWidget.dragSourceIndex = -1
+                        appBarWidget.dragTargetIndex = -1
+                    }
+
+                    // ── Click handlers ────────────────────────────
                     onClicked: (mouse) => {
+                        if (isDragging) return  // ignore click after drag
                         if (mouse.button == Qt.LeftButton){
                             if (!type.includes("active")){
                                 appBarWidget.contextIcon = content.getImageIcon()
@@ -1109,7 +1223,7 @@ RoundedBlock{
                         source: iconSource === "*" || iconSource === ""
                             ? root.iconSource("open_app")
                             : iconSource
-                        anchors.centerIn: parent
+                        anchors.centerIn: parent 
                         width: parent.width * 1.5
                         height: parent.height * 1.5
                         fillMode: Image.PreserveAspectFit

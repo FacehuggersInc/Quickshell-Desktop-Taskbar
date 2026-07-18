@@ -542,7 +542,57 @@ class Utill():
             with open(cachepath, "w") as f: json.dump(cache, f, indent=4)
         return ",".join(results)
 
-    # ── DESKTOP APP PARSER ───────────────────────────────────────────────────
+    @argfunc
+    def setappicon(self, *args):
+        """Write a specific icon to the cache for a class name.
+        This lets the 'Add from Installed Apps' flow use the .desktop icon directly.
+        Args: className iconNameOrPath
+        The icon can be a system icon name (e.g. 'code') or a full path.
+        If it's a name, we resolve it to a path via the icon index first.
+        Returns: the resolved icon path or empty string on failure.
+        """
+        if len(args) < 2:
+            return ""
+        cls  = args[0].strip()
+        icon = args[1].strip()
+
+        cachepath = ICON_CACHE
+
+        # Load or build cache
+        cache = {"apps": {}, "index": []}
+        if cachepath.exists():
+            try:
+                with open(cachepath, "r") as f:
+                    cache = json.load(f)
+            except Exception:
+                cachepath.unlink(missing_ok=True)
+                cache = {"apps": {}, "index": []}
+
+        if not cache.get("index"):
+            cache["index"] = self.build_icon_index()
+
+        # If icon is already a full path that exists, use it directly
+        if os.path.isfile(icon):
+            cache["apps"][cls] = icon
+            with open(cachepath, "w") as f:
+                json.dump(cache, f, indent=4)
+            return icon
+
+        # Otherwise treat as a system icon name — fuzzy match against index
+        names = [e[0] for e in cache["index"]]
+        from rapidfuzz import fuzz, process as rfprocess
+        matches = rfprocess.extract(icon.lower(), names, scorer=fuzz.WRatio, limit=10)
+        candidates = [cache["index"][idx] for _, score, idx in matches if score >= 60]
+        if candidates:
+            best = next((c for c in candidates if c[2] >= 90), None) or max(candidates, key=lambda x: x[2])
+            cache["apps"][cls] = best[1]
+            with open(cachepath, "w") as f:
+                json.dump(cache, f, indent=4)
+            return best[1]
+
+        return ""
+
+
 
     @argfunc
     def getdesktopapps(self, *args):
