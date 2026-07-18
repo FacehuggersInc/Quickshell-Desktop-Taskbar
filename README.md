@@ -127,7 +127,7 @@ Log out and back in after.
 **Clone the config** — this places the shell config directly where Quickshell expects it:
 
 ```bash
-git clone https://github.com/FacehuggersInc/quickshell.git ~/.config/quickshell
+git clone https://github.com/FacehuggersInc/Quickshell-Desktop-Taskbar.git ~/.config/quickshell
 ```
 
 **Create your `config.json`** — the shell will not start without it. Create it manually at `~/.config/quickshell/config.json` using the [Configuration](#7-configuration) section as a reference. At minimum you need `iconsPath`, `fontFamily`, `theme`, and `commands.terminal`. `displays` and wallpaper keys are only needed if `wallpapers.cycling` is `true` — see the [Configuration](#7-configuration) section for what is truly required.
