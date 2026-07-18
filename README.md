@@ -12,7 +12,6 @@ A Hyprland desktop shell built with Quickshell.
 > - **System Tray** icons are rendered as-is — coloured icons won't always match the shell's theme
 > - **Workspace switching and window hiding** are imperfect — behaviour can be inconsistent depending on the app
 > - **Widgets are static** — the bar layout is hardcoded in `MainWindow.qml`. There is currently no way to add, remove, or reorder widgets from `config.json` alone
-> - **Missing edge cases** — there are interactions and menu states that have not been fully accounted for. Some flows may behave unexpectedly or not work at all in certain situations
 > - **QoL settings are incomplete** — many things that would be useful to configure from the settings panel are not yet exposed there and require editing the config or source directly
 
 ---
@@ -152,7 +151,8 @@ Place all icons in the directory set as `iconsPath`. The path must end with a tr
 
 ```
 add                 alarm               apps
-audio_adjust        backlight_high      backlight_low
+audio_adjust        back                backlight_high
+backlight_low
 backlight_off       bluetooth           bluetooth_connected
 bluetooth_disabled  bluetooth_searching brightness
 calendar_add        calendar_edit       calendar_event
@@ -198,9 +198,10 @@ The table below documents what the shell is actually doing in the background. Th
 | Function | What the shell uses it for |
 |---|---|
 | `--getcurrentplaying` | Polls MPRIS every 300ms when the audio popup is open — returns title, artist, album, art URL, source app and playback status |
-| `--getactiveapplications` | Polls every 650ms to build the app bar — returns all open windows with their class, PID, command, workspace and title |
-| `--getappicons` | Called when an app class name has no cached icon — fuzzy-matches the class name against icon files on disk and caches the result (class name → icon path) in `.icon-path-cache` |
-| `--getdesktopapps` | Called once when the "Add App" window opens — parses all `.desktop` files including Flatpak |
+| `--getactiveapplications` | Polls every 650ms to build the app bar — returns all open windows with their class, PID, command, workspace, title and Hyprland window address. Each window is tracked individually by address so apps with multiple windows (e.g. browsers) show all of them in the context menu |
+| `--getappicons` | Called when an app class name has no cached icon — resolves the icon using a layered lookup: exact name match in icon theme directories and `/usr/share/pixmaps/`, Flatpak export paths, dotted/hyphenated name segmentation (e.g. `org.gnome.Nautilus` → `nautilus`), then fuzzy matching as a last resort (threshold 85). Results are cached in `.icon-path-cache`. The cache auto-invalidates when icon directories change (e.g. a new Flatpak is installed) |
+| `--setappicon` | Called when pinning an app from the installed apps list — resolves the `.desktop` file's `Icon` name to a full path using the same layered lookup as `--getappicons` and writes it to the cache |
+| `--getdesktopapps` | Called each time the "Add App" window opens — parses all `.desktop` files including Flatpak exports. Previously-pinned apps are filtered out using the current launcher list so recently unpinned apps appear immediately |
 | `--getnetworkinfo` | Polls every 1.5s when the network popup is open — samples `/proc/net/dev` twice 0.5s apart to calculate live speeds |
 | `--getaudiodevices` | Called when the audio popup opens — lists input and output devices via `wpctl status` |
 | `--getcommandhistory` | Called when the Command History popup opens — reads `~/.bash_history`, `~/.zsh_history` and `~/.local/share/fish/fish_history`. **Filters heavily** — strips sudo, package managers, git, file ops, shell builtins and any single-word command. The intent is app launches and custom scripts only. If a command you expect to see is missing it is almost certainly being filtered. Edit `FILTER_PREFIXES` in `utill.py` to loosen this. |
@@ -355,6 +356,7 @@ Any `{v-key}` that doesn't match a key in `variables` is left as-is.
 > - `udisksctl mount` — USB mounting (via `utill.py`)
 > - `notify-send` — desktop notifications
 > - `kill {pid}` — force-closing apps
+> - `hyprctl dispatch closewindow address:{addr}` — closing individual windows by their Hyprland address
 > - `rm -f` — cleaning up smart crop temp files
 
 ---
@@ -433,8 +435,18 @@ The easiest way to pin an app is to simply open it, then **right-click its icon 
 > **This is not always accurate.** Some apps launch under a different class name than their executable, spawn child processes with different names, or use wrapper scripts. If a pinned app doesn't launch anything when clicked, or opens under the wrong icon, you may need to manually set the correct `command` in `config.json` or use the **Custom App** form in the Add App menu.
 
 For full control, use the **Add App** button (apps icon, far right of the app bar) which gives you two options:
-- **From Installed Apps** — picks from all `.desktop` files on your system
+- **From Installed Apps** — picks from all `.desktop` files on your system. Flatpak apps are included and their icons are resolved from the Flatpak export directories
 - **Custom App** — manually set the class name, command, icon, and options
+
+**Reordering** — pinned apps can be reordered by dragging them left or right within the app bar. A drop indicator shows the target position. The new order is saved to `config.json` and persists across sessions.
+
+**Context menu** — right-clicking an app icon opens a context menu organised into sections:
+
+- **Launch** — open the app, open with last/new args, jump list sub-menu (all saved arg variants)
+- **Windows** (only for running apps) — show/hide, send to workspace, close individual windows (one entry per window), kill all
+- **Settings** — pin/un-pin, copy command, masque sub-menu, arg options toggle
+
+Items with a **›** arrow open a sub-menu. Click the **‹ Back** header to return to the main menu. Clicking outside the menu dismisses it entirely.
 
 ---
 
@@ -482,9 +494,11 @@ Most polling uses `Timer` components with fixed intervals. These control how qui
 
 ## 13. First Run
 
-On the first launch `.icon-path-cache` does not exist yet. `AppBarWidget` will call `--getappicons` which walks your icon theme directory and records each icon's name and path — this is a one-time operation and may take a few seconds. Subsequent launches read from the cache and are fast. The cache stores only class name → icon path mappings, not icon image data.
+On the first launch `.icon-path-cache` does not exist yet. `AppBarWidget` will call `--getappicons` which walks your icon theme directories, Flatpak export paths, and `/usr/share/pixmaps/` — recording each icon's name and path. This is a one-time operation and may take a few seconds. Subsequent launches read from the cache and are fast. The cache stores only class name → icon path mappings, not icon image data.
 
 The cache is stored at `~/.config/quickshell/.icon-path-cache`.
+
+The cache auto-invalidates when the icon directories change (e.g. a new Flatpak is installed or an icon theme is updated). You can also force a rebuild by deleting the cache file.
 
 ---
 

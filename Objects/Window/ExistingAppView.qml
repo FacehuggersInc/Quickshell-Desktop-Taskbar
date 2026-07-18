@@ -19,7 +19,6 @@ Item {
     Process {
         id: desktopAppsProc
         command: root.newUtill(["--getdesktopapps"])
-        running: true
         stdout: StdioCollector {
             onStreamFinished: {
                 var text = this.text.trim()
@@ -49,6 +48,17 @@ Item {
                 existingView.filteredApps = apps
                 existingView.loading      = false
             }
+        }
+    }
+
+    // Re-fetch the full app list every time this view becomes visible
+    // so that recently pinned/unpinned apps are correctly shown/hidden.
+    onVisibleChanged: {
+        if (visible) {
+            loading = true
+            allApps = []
+            filteredApps = []
+            desktopAppsProc.running = true
         }
     }
 

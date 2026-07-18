@@ -447,7 +447,8 @@ class Utill():
                 clazz, icon = match[0].split(":", 1)
             else:
                 icon = "*"  # will use fallback in QML
-            return_str += f"{proc['pid']},{proc['class']},{icon},{proc['command']},{proc['workspace']['name']},{proc['title']}|"
+            address = proc.get('address', '')
+            return_str += f"{proc['pid']},{proc['class']},{icon},{proc['command']},{proc['workspace']['name']},{proc['title']},{address}|"
 
         return return_str.rstrip("|").strip()
 

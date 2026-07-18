@@ -203,6 +203,7 @@ RoundedBlock{
 
         var newApps = newDataStr.split("|")
         var newPIDs = []
+        var newAddresses = []
         var newClasses = []
         var classes = []
 
@@ -226,7 +227,9 @@ RoundedBlock{
             classes.push(name)
             if (!appStore[name]) newClasses.push(name)
             var workspace = app[4].trim()
-            var windowTitle = app[5].trim()
+            var windowTitle = app[5] ? app[5].trim() : ""
+            var address = app[6] ? app[6].trim() : pid
+            newAddresses.push(address)
 
             //Masking & Reassignment
             var stateAssignmentKey = name
@@ -260,21 +263,22 @@ RoundedBlock{
                 }
             }
 
-            // PID duplicate check
-            var hasPID = false
+            // Deduplicate by window address (not PID — one process can have many windows)
+            var hasAddress = false
             for (var j=0; j < appStore[stateAssignmentKey].procs.length; j++){
                 var instance = appStore[stateAssignmentKey].procs[j]
-                if (instance.pid === pid){
-                    hasPID = true
+                if (instance.address === address){
+                    hasAddress = true
                     instance['workspace'] = workspace
                     instance['windowTitle'] = windowTitle
                     break
                 }
             }
-            if (hasPID) continue
+            if (hasAddress) continue
 
             appStore[stateAssignmentKey].procs.push({
                 pid: pid,
+                address: address,
                 name: name,
                 windowTitle: windowTitle,
                 workspace: workspace 
@@ -290,7 +294,7 @@ RoundedBlock{
             }
             for (var i = instances.length - 1; i >= 0; i--) {
                 var instance = instances[i]
-                if (!newPIDs.includes(instance.pid) || !classes.includes(instance.name)) {
+                if (!newAddresses.includes(instance.address) || !classes.includes(instance.name)) {
                     instances.splice(i, 1)
                 }
             }
@@ -555,118 +559,136 @@ RoundedBlock{
     function openContextMenu(popupObject){
         var contextHiddenCount = getHiddenCount(contextTarget.name)
         var contextIsPinned = isAppPinned(contextTarget.name)
-        var items = [
-            {"name": contextTarget.nickname ? "Open " + contextTarget.nickname : "Open " + contextTarget.name, "action":"launch", "icon":"open_app"},
-            {"name": "Copy cmd", "action":"copy:command", "icon":"copy_content"},
-            {
-                "name": contextIsPinned ? "Un-Pin" : "Pin", 
-                "action":"pin", 
-                "icon": contextIsPinned ? "unpin" : "pin"
-            },
-            {"name":"Open w/ new args", "action":"launch:with", "icon":"terminal"}
-        ]
+        var items = []
 
-        if (contextTarget.options.length > 0){
-            items.splice(1, 0, {"name":"Open w/ last args", "action":"launch:last", "icon":"history"})
-            items.splice(2, 0, {"name": "Copy cmd + last args", "action":"copy:args", "icon":"copy_content"})
-            for (var i=0; i < contextTarget.options.length; i++){
-                if (i > root.settings.launcherflags.maxOptions) { break }
+        // ── Launch section (always visible at top) ──────────────────
+        var appLabel = contextTarget.nickname || contextTarget.name
+        items.push({"name": "Open " + appLabel, "action":"launch", "icon":"open_app"})
+
+        if (contextTarget.options && contextTarget.options.length > 0) {
+            items.push({"name":"Open w/ last args", "action":"launch:last", "icon":"history"})
+        }
+
+        // Jump list sub-menu (only if there are saved arg sets)
+        if (contextTarget.options && contextTarget.options.length > 0) {
+            var jumpItems = []
+            for (var i = 0; i < contextTarget.options.length; i++) {
+                if (i > root.settings.launcherflags.maxOptions) break
                 var index = contextTarget.options.length - 1 - i
                 var optSet = contextTarget.options[index]
-                items.splice(
-                    0, 0,
-                    {"name":optSet[0], "action":"launch:custom", "icon":"terminal", "index":index},
-                )
+                jumpItems.push({"name": optSet[0], "action":"launch:custom", "icon":"terminal", "index": index})
+            }
+            items.push({
+                "name": "Jump List (" + jumpItems.length + ")",
+                "type": "submenu",
+                "icon": "history",
+                "children": jumpItems
+            })
+        }
+
+        items.push({"name":"Open w/ new args", "action":"launch:with", "icon":"terminal"})
+
+        if (contextTarget.command.includes("/")) {
+            items.push({"name":"Open In Files", "action":"open", "icon":"open_folder"})
+        }
+
+        // ── Windows section (only for running apps) ─────────────────
+        var pids = getPIDs(contextTarget.name)
+        if (contextTarget.type.includes("active") && pids.length > 0) {
+            items.push({"name": "Windows", "type": "divider"})
+
+            if (contextHiddenCount > 0) {
+                items.push({"name": "Show", "action": "workspace:show", "icon": "show"})
+            } else {
+                items.push({"name": "Hide", "action": "workspace:hide", "icon": "hide"})
+            }
+
+            items.push({"name": "Send to workspace...", "action": "workspace:send", "icon": "home"})
+
+            // Close sub-menu — one entry per window
+            var state = appStore[contextTarget.name]
+            if (state && state.procs && state.procs.length > 0) {
+                if (state.procs.length === 1) {
+                    // Only one window — show directly, no sub-menu needed
+                    items.push({"name": "Close '" + state.procs[0].windowTitle.trim() + "'", "action":"close", "icon":"close", "index": 0})
+                } else {
+                    var closeItems = []
+                    for (var i = 0; i < state.procs.length; i++) {
+                        var instance = state.procs[i]
+                        closeItems.push({"name": "Close '" + instance.windowTitle.trim() + "'", "action":"close", "icon":"close", "index": i})
+                    }
+                    items.push({
+                        "name": "Close Window (" + closeItems.length + ")",
+                        "type": "submenu",
+                        "icon": "close",
+                        "children": closeItems
+                    })
+                }
+                items.push({"name":"Kill all", "action":"kill", "icon":"stop"})
             }
         }
 
-        if (contextTarget.command.includes("/")){
-            items.splice(Math.min(2 + root.settings.launcherflags.maxOptions, items.length), 0, {"name":"Open In Files", "action":"open", "icon":"open_folder"},)
+        // ── Settings section ────────────────────────────────────────
+        items.push({"name": "Settings", "type": "divider"})
+
+        items.push({
+            "name": contextIsPinned ? "Un-Pin" : "Pin",
+            "action": "pin",
+            "icon": contextIsPinned ? "unpin" : "pin"
+        })
+
+        items.push({"name": "Copy cmd", "action":"copy:command", "icon":"copy_content"})
+        if (contextTarget.options && contextTarget.options.length > 0) {
+            items.push({"name": "Copy cmd + last args", "action":"copy:args", "icon":"copy_content"})
         }
 
-        if (contextTarget.type.includes("active")){
-            items.splice(
-                -1, 0,
-                {
-                    "name": contextHiddenCount > 0 ? "Show" : "Hide", 
-                    "action": contextHiddenCount > 0 ? "workspace:show" : "workspace:hide",
-                    "icon" : contextHiddenCount > 0 ? "show" : "hide"
-                }
-            )
-        }
-
-        // Send to workspace — for active apps only
-        if (contextTarget.type.includes("active")) {
-            items.push({
-                "name": "Send to workspace...",
-                "action": "workspace:send",
-                "icon": "home"
-            })
-        }
-
-        // Masque options
+        // Masque options as sub-menu
+        var masqueItems = []
         var currentMasque = getAppMasque(contextTarget.name)
         if (currentMasque !== "") {
-            // This app is masquing under another — offer to remove
-            items.push({
-                "name": "Remove Masque (" + currentMasque + ")",
-                "action": "masque:remove",
-                "icon": "masked"
-            })
+            masqueItems.push({"name": "Remove Masque (" + currentMasque + ")", "action": "masque:remove", "icon": "masked"})
         } else {
-            // Not masquing — offer to set one
-            items.push({
-                "name": "Add as Masque...",
-                "action": "masque:open",
-                "icon": "masked_add"
-            })
+            masqueItems.push({"name": "Add as Masque...", "action": "masque:open", "icon": "masked_add"})
         }
-
-        // If this is a pinned app with masques under it — offer to manage them
         if (contextIsPinned) {
             var masquesUnder = getMasquesUnder(contextTarget.name)
             if (masquesUnder.length > 0) {
-                items.push({
-                    "name": "Manage Masques (" + masquesUnder.length + ")...",
-                    "action": "masque:manage",
-                    "icon": "masked"
-                })
+                masqueItems.push({"name": "Manage Masques (" + masquesUnder.length + ")...", "action": "masque:manage", "icon": "masked"})
             }
         }
+        items.push({
+            "name": "Masque",
+            "type": "submenu",
+            "icon": "masked",
+            "children": masqueItems
+        })
 
-        if (appHasNoOptionsFlag(contextTarget.name)){
-            items.push(
-                {
-                    "name": "Toggle No Arg Options: To OFF",
-                    "action": "toggleOptions",
-                    "icon": "settings"
-                }
-            )
+        if (appHasNoOptionsFlag(contextTarget.name)) {
+            items.push({"name": "Arg Options: Turn OFF", "action": "toggleOptions", "icon": "settings"})
         } else {
-            items.push(
-                {
-                    "name": "Toggle No Arg Options: To ON",
-                    "action": "toggleOptions",
-                    "icon": "settings"
-                }
-            )
+            items.push({"name": "Arg Options: Turn ON", "action": "toggleOptions", "icon": "settings"})
         }
 
-        var pids = getPIDs(contextTarget.name)
-        if (pids.length > 0){
-            var state = appStore[contextTarget.name]
-            for (var i=0; i < state.procs.length; i++){
-                var instance = state.procs[i]
-                items.push({"name":"Close '" + instance.windowTitle.trim() +"'", "action":"close", "icon":"close", "index": i})
+        // ── Populate the menu model ─────────────────────────────────
+        popup.closeSubMenu()
+
+        // Extract submenu children into a separate map (ListModel can't
+        // store nested arrays, and we now use a plain JS array anyway)
+        var subData = {}
+        for (var k = 0; k < items.length; k++) {
+            if (items[k].type === "submenu" && items[k].children) {
+                subData[items[k].name] = items[k].children
             }
-            items.push({"name":"Kill all", "action":"kill", "icon":"stop"})
         }
+        popup.subMenuData = subData
+        popup.actions = items
 
-        popup.actions.clear()
-        for (var i=0; i < items.length; i++){
-            popup.actions.append(items[i])
+        // Calculate height: normal items = 35px, dividers = 28px
+        var totalHeight = 0
+        for (var k = 0; k < items.length; k++) {
+            totalHeight += (items[k].type === "divider") ? 28 : 35
         }
-        popup.height = (items.length * 35) 
+        popup.implicitHeight = totalHeight + 8
         popup.forceOpen(popupObject)
     }
 
@@ -711,8 +733,14 @@ RoundedBlock{
     function closeApp(index, name){
         var state = appStore[name]
         var instance = state.procs[index]
-        var title = instance.windowTitle
-        root.execute( root.newUtill( root.combine( ["--closehyprwindow"], title.split(" ") ) ) )
+        // Close by hyprland window address — exact, no fuzzy matching needed
+        if (instance.address) {
+            root.execute(['hyprctl', 'dispatch', 'closewindow', 'address:' + instance.address])
+        } else {
+            // Fallback for windows without address data
+            var title = instance.windowTitle
+            root.execute( root.newUtill( root.combine( ["--closehyprwindow"], title.split(" ") ) ) )
+        }
         state.procs.splice(index, 1)
         if (state.procs.length === 0){
             delete appStore[name]
