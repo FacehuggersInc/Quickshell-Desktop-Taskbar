@@ -16,6 +16,44 @@ A Hyprland desktop shell built with Quickshell.
 
 ---
 
+## Features
+
+**App Bar** — pinned and active apps with live window tracking, instance counts, and multi-window awareness. Pin apps from right-click or from all installed `.desktop` files (including Flatpak). Drag to reorder pinned apps — order persists across sessions. Icons are resolved automatically from system icon themes, Flatpak export paths, and `/usr/share/pixmaps/`.
+
+**Context Menus** — organised into sections (Launch, Windows, Settings) with sub-menus for jump lists, window management, and masque options. Close individual windows by name, send windows to workspaces, copy commands, toggle launch options.
+
+**Jump Lists** — saved launch argument variants per app, similar to Windows jump lists. Right-click to launch with specific args, recent args, or custom args.
+
+**Masquing** — redirect windows from one app class to appear under a different pinned app's icon. Useful for game launchers, Electron wrappers, or apps that spawn child processes under different class names.
+
+**Gaming Mode** — auto-triggered when a configured game app is detected. The bar hides completely; hovering near the top edge for 1 second reveals a minimal bar with a subtle clock and notification dot. Click to exit. A re-enter button appears on the app bar when paused. Configure per-app from the context menu or toggle manually from Settings.
+
+**Workspace Switcher** — shows all workspaces with window counts and active workspace highlighting.
+
+**Audio Management** — volume control, input/output device switching, media controls with album art and track metadata.
+
+**Bluetooth** — device pairing, connection management, scanning, and battery display.
+
+**Display Brightness** — per-display DDC brightness sliders with global sync option.
+
+**Theater Mode** — dims non-primary displays for focused viewing.
+
+**Notifications** — toast popups with action buttons, notification panel with history, and unread badge.
+
+**Network** — interface info, VPN status, and live upload/download speed.
+
+**System Tray** — renders tray icons from running applications.
+
+**Wallpaper Cycling** — timed wallpaper rotation with day/night scheduling, per-display random selection, smart cropping for vertical monitors, and optional auto-theming from wallpaper colors.
+
+**Theme Engine** — full color theming from config or auto-generated from wallpaper. Includes a color picker with history.
+
+**USB Quick Access** — auto-mount detection with one-click open-in-files.
+
+**Settings Panel** — wallpaper controls, display brightness, theater mode, gaming mode, quick actions, and USB management.
+
+---
+
  Requires a **Wayland session** — does not work under X11.
 
 ---
@@ -305,6 +343,11 @@ If you have not yet created `config.json` see [Installation](#4-installation) ab
         "dimBrightness":  10,            // brightness % for non-primary displays in theater mode (0-50)
         "wallpaper":      ""             // path to wallpaper set on non-primary displays when active
     },
+    "gaming": {
+        "enabled":   false,              // whether gaming mode is currently active
+        "barHeight": 14,                 // height in px of the revealed gaming bar (default 14)
+        "apps":      []                  // class names that auto-trigger gaming mode
+    },
     "launcherflags": {
         "maxOptions":    3,
         "filters":       {},   // class: [args to strip]
@@ -468,7 +511,29 @@ You can also set a masque upfront when adding a custom app via the **Custom App*
 
 ---
 
-## 12. Timers & Reactivity
+## 12. Gaming Mode
+
+Gaming mode hides the bar to get out of the way during fullscreen or borderless-windowed games. When active, the bar shrinks to an invisible 2px sliver. Hovering your mouse near the top edge of the screen for 1 second reveals a minimal bar with a subtle clock and notification dot — click it to exit gaming mode.
+
+**Manual toggle** — open the Settings panel and flip the Gaming Mode switch. This works regardless of whether a gaming app is running.
+
+**Auto-trigger** — right-click any app in the app bar → **Gaming App: ON**. When that app's window class is detected as active, gaming mode enables automatically. When the app closes, gaming mode disables. Multiple apps can be added to the trigger list.
+
+**Masqued games** — if a game is masqued under another app (e.g. `HytaleClient` masqued under `HytaleLauncher`), the gaming trigger checks process-level class names, not just app bar entries. Toggle gaming mode for masqued apps via the parent's context menu → **Masque** sub-menu → **ClassName Gaming: ON/OFF**.
+
+**Re-enter button** — when you click the revealed bar to exit gaming mode while a game is still running, a gaming mode icon appears on the app bar. Click it to re-enter gaming mode without reopening settings or the game. The icon disappears when the game closes.
+
+**Config:**
+
+| Key | Default | Description |
+|---|---|---|
+| `gaming.enabled` | `false` | Whether gaming mode is currently active |
+| `gaming.barHeight` | `14` | Height in pixels of the revealed gaming bar |
+| `gaming.apps` | `[]` | Class names that auto-trigger gaming mode when detected |
+
+---
+
+## 13. Timers & Reactivity
 
 Most polling uses `Timer` components with fixed intervals. These control how quickly the UI reacts to changes — lower means faster updates but more subprocess calls. **If the default intervals feel too slow or too aggressive for your system, change them directly in the file listed.**
 
@@ -492,7 +557,7 @@ Most polling uses `Timer` components with fixed intervals. These control how qui
 
 ---
 
-## 13. First Run
+## 14. First Run
 
 On the first launch `.icon-path-cache` does not exist yet. `AppBarWidget` will call `--getappicons` which walks your icon theme directories, Flatpak export paths, and `/usr/share/pixmaps/` — recording each icon's name and path. This is a one-time operation and may take a few seconds. Subsequent launches read from the cache and are fast. The cache stores only class name → icon path mappings, not icon image data.
 
@@ -502,7 +567,7 @@ The cache auto-invalidates when the icon directories change (e.g. a new Flatpak 
 
 ---
 
-## 14. Run
+## 15. Run
 
 ```bash
 quickshell

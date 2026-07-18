@@ -27,6 +27,10 @@ RoundedBlock{
     property int dragSourceIndex: -1
     property int dragTargetIndex: -1
 
+    // Gaming mode runtime state (not saved — resets each session)
+    property bool gamingAppActive: false   // true when any gaming app class is in appStore
+    property bool gamingUserPaused: false  // true when user manually exited while a game runs
+
     // Args that are never meaningful to save as launch options —
     // typically DBus activation, daemon, or session-management flags
     // that only make sense when the desktop environment spawns the app.
@@ -477,6 +481,83 @@ RoundedBlock{
             addedStaticApps = true
             getStaticApps()
         }
+        checkGamingMode()
+    }
+
+    // ── Gaming mode auto-trigger ────────────────────────────────────
+    // Checks if any app in settings.gaming.apps is currently active,
+    // including apps that are masqued under a different pinned app.
+    function checkGamingMode() {
+        if (!root.settings.gaming) return
+        var gamingApps = root.settings.gaming.apps || []
+        if (gamingApps.length === 0) {
+            gamingAppActive = false
+            return
+        }
+
+        var anyActive = false
+        for (var i = 0; i < gamingApps.length && !anyActive; i++) {
+            var gamingApp = gamingApps[i]
+            // Direct match in appStore
+            if (appStore[gamingApp] && appStore[gamingApp].procs.length > 0) {
+                anyActive = true
+                break
+            }
+            // Check inside masqued entries — the proc's original class name
+            // is stored in proc.name even when reassigned to a parent
+            for (var key in appStore) {
+                var procs = appStore[key].procs
+                for (var j = 0; j < procs.length; j++) {
+                    if (procs[j].name === gamingApp) {
+                        anyActive = true
+                        break
+                    }
+                }
+                if (anyActive) break
+            }
+        }
+
+        var wasActive = gamingAppActive
+        gamingAppActive = anyActive
+
+        if (anyActive && !wasActive) {
+            // A gaming app just appeared — auto-enable (fresh start, clear pause)
+            gamingUserPaused = false
+            root.settings.gaming.enabled = true
+            root.saveSettings()
+        } else if (anyActive && !root.settings.gaming.enabled && !gamingUserPaused) {
+            // Gaming app still running, mode got disabled externally but user didn't pause
+            root.settings.gaming.enabled = true
+            root.saveSettings()
+        } else if (!anyActive && wasActive) {
+            // All gaming apps closed — disable and clear pause
+            gamingUserPaused = false
+            if (root.settings.gaming.enabled) {
+                root.settings.gaming.enabled = false
+                root.saveSettings()
+            }
+        }
+    }
+
+    function isGamingApp(className) {
+        if (!root.settings.gaming || !root.settings.gaming.apps) return false
+        return root.settings.gaming.apps.includes(className)
+    }
+
+    function toggleGamingApp(className) {
+        if (!root.settings.gaming) {
+            root.settings.gaming = { enabled: false, apps: [] }
+        }
+        if (!root.settings.gaming.apps) {
+            root.settings.gaming.apps = []
+        }
+        var idx = root.settings.gaming.apps.indexOf(className)
+        if (idx >= 0) {
+            root.settings.gaming.apps.splice(idx, 1)
+        } else {
+            root.settings.gaming.apps.push(className)
+        }
+        root.saveSettings()
     }
 
     // Sync the apps ListModel with settings.launchers without clearing.
@@ -647,6 +728,14 @@ RoundedBlock{
         var currentMasque = getAppMasque(contextTarget.name)
         if (currentMasque !== "") {
             masqueItems.push({"name": "Remove Masque (" + currentMasque + ")", "action": "masque:remove", "icon": "masked"})
+            // Gaming toggle for this masqued app itself
+            var selfIsGaming = isGamingApp(contextTarget.name)
+            masqueItems.push({
+                "name": contextTarget.name + " Gaming: " + (selfIsGaming ? "ON" : "OFF"),
+                "action": "toggleGamingMasque",
+                "icon": "dark_mode",
+                "className": contextTarget.name
+            })
         } else {
             masqueItems.push({"name": "Add as Masque...", "action": "masque:open", "icon": "masked_add"})
         }
@@ -654,6 +743,17 @@ RoundedBlock{
             var masquesUnder = getMasquesUnder(contextTarget.name)
             if (masquesUnder.length > 0) {
                 masqueItems.push({"name": "Manage Masques (" + masquesUnder.length + ")...", "action": "masque:manage", "icon": "masked"})
+                // Gaming toggle for each masqued class under this pin
+                for (var m = 0; m < masquesUnder.length; m++) {
+                    var masqueClass = masquesUnder[m].className
+                    var mIsGaming = isGamingApp(masqueClass)
+                    masqueItems.push({
+                        "name": masqueClass + " Gaming: " + (mIsGaming ? "ON" : "OFF"),
+                        "action": "toggleGamingMasque",
+                        "icon": "dark_mode",
+                        "className": masqueClass
+                    })
+                }
             }
         }
         items.push({
@@ -668,6 +768,14 @@ RoundedBlock{
         } else {
             items.push({"name": "Arg Options: Turn ON", "action": "toggleOptions", "icon": "settings"})
         }
+
+        // Gaming mode auto-trigger toggle
+        var isGaming = isGamingApp(contextTarget.name)
+        items.push({
+            "name": isGaming ? "Gaming App: ON" : "Gaming App: OFF",
+            "action": "toggleGaming",
+            "icon": isGaming ? "dark_mode" : "dark_mode"
+        })
 
         // ── Populate the menu model ─────────────────────────────────
         popup.closeSubMenu()
@@ -1031,6 +1139,10 @@ RoundedBlock{
                 for (var i = 0; i < pids.length; i++) killApp(pids[i])
             } else if (modelData.action === "toggleOptions") {
                 toggleNoOptions(contextTarget.name)
+            } else if (modelData.action === "toggleGaming") {
+                toggleGamingApp(contextTarget.name)
+            } else if (modelData.action === "toggleGamingMasque") {
+                toggleGamingApp(modelData.className)
             } else if (modelData.action === "workspace:send") {
                 var pids = getPIDs(contextTarget.name)
                 workspaceSendPopup.targetPid   = pids.length > 0 ? pids[0] : ""
@@ -1352,6 +1464,27 @@ RoundedBlock{
                         }
                     }
                 }
+            }
+        }
+
+        // ── Gaming mode re-enter button ─────────────────────────────
+        // Visible when a gaming app is running but the user manually
+        // exited gaming mode. Click to go back into gaming mode.
+        // Also stays visible if gamingUserPaused is set, even during
+        // brief appStore rebuilds, to prevent flickering.
+        IconButton {
+            id: gamingModeButton
+            iconName: "dark_mode"
+            iconSize: 22
+            tooltipText: "Re-enter Gaming Mode"
+            color: root.settings.theme.primary
+            visible: (appBarWidget.gamingAppActive || appBarWidget.gamingUserPaused)
+                && !(root.settings.gaming && root.settings.gaming.enabled)
+            onClicked: {
+                appBarWidget.gamingUserPaused = false
+                if (!root.settings.gaming) root.settings.gaming = { enabled: false, apps: [] }
+                root.settings.gaming.enabled = true
+                root.saveSettings()
             }
         }
 

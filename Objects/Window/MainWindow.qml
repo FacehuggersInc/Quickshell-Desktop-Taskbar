@@ -23,14 +23,109 @@ PanelWindow {
         left: true
         right: true
     }
-    implicitHeight: 60
+
+    // ── Gaming mode ─────────────────────────────────────────────────
+    property bool gamingMode: root.settings.gaming ? root.settings.gaming.enabled : false
+    property int  gamingBarHeight: root.settings.gaming ? (root.settings.gaming.barHeight || 14) : 14
+    property bool gamingBarRevealed: false
+
+    implicitHeight: gamingMode
+        ? (gamingBarRevealed ? gamingBarHeight : 2)
+        : 60
     color: '#00ffffff'
+
+    Behavior on implicitHeight {
+        NumberAnimation { duration: 150; easing.type: Easing.InOutQuad }
+    }
 
     property int padding: 8
     property int spacing: 5
 
+    // ── Gaming mode: hover zone + revealed bar ──────────────────────
+    // A 2px sliver is always present so the mouse has something to enter.
+    // After hovering for 1 second the bar expands to gamingBarHeight.
+    MouseArea {
+        id: gamingHoverZone
+        anchors.fill: parent
+        hoverEnabled: true
+        visible: mainWindow.gamingMode
+        z: 10  // above everything else in gaming mode
+
+        onEntered: gamingRevealTimer.start()
+        onExited: {
+            gamingRevealTimer.stop()
+            mainWindow.gamingBarRevealed = false
+        }
+        onClicked: {
+            if (mainWindow.gamingBarRevealed) {
+                appbar.gamingUserPaused = true
+                root.settings.gaming.enabled = false
+                root.saveSettings()
+                mainWindow.gamingBarRevealed = false
+            }
+        }
+
+        cursorShape: gamingBarRevealed ? Qt.PointingHandCursor : Qt.ArrowCursor
+    }
+
+    Timer {
+        id: gamingRevealTimer
+        interval: 1000
+        onTriggered: mainWindow.gamingBarRevealed = true
+    }
+
+    // The visible bar content — only shown when revealed
+    Rectangle {
+        id: gamingBar
+        anchors.fill: parent
+        visible: mainWindow.gamingMode && mainWindow.gamingBarRevealed
+        color: root.settings.theme.surface
+        opacity: 0.25
+
+        // Subtle clock
+        Text {
+            id: gamingClock
+            anchors.centerIn: parent
+            color: root.settings.theme.text
+            opacity: 0.35
+            font.family: root.settings.fontFamily
+            font.weight: 500
+            font.pixelSize: 10
+
+            Process {
+                id: gamingClockProc
+                command: root.newUtill(["--format", "%I:%M %p"])
+                running: mainWindow.gamingMode
+                stdout: StdioCollector {
+                    onStreamFinished: gamingClock.text = this.text.trim()
+                }
+            }
+            Timer {
+                interval: 30000
+                running: mainWindow.gamingMode
+                repeat: true
+                onTriggered: gamingClockProc.running = true
+            }
+        }
+
+        // Notification dot
+        Rectangle {
+            width: 4; height: 4; radius: 2
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: gamingClock.right
+            anchors.leftMargin: 6
+            color: root.settings.theme.primary
+            opacity: 0.6
+            visible: root.notifyServer
+                ? root.notifyServer.trackedNotifications.values.length > 0
+                : false
+        }
+    }
+
+    // ── Normal bar content ──────────────────────────────────────────
     Pane{
         anchors.fill: parent
+        visible: !mainWindow.gamingMode
 
         background : Rectangle {
             color: '#00000000'
@@ -82,7 +177,7 @@ PanelWindow {
                 implicitHeight: rightModules.height
             }
 
-            RoundedBlock{ 
+            RoundedBlock{
                 id: rightModules
                 
                 RowLayout {

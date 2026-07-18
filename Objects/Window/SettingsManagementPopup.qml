@@ -1346,6 +1346,77 @@ PopupWindow {
 
                 Item { implicitHeight: 8 }
 
+                // ── GAMING ───────────────────────────────────────
+                TextDivider {
+                    dividerText: "Gaming"
+                    dividerHeight: 2
+                    Layout.fillWidth: true
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    IconButton {
+                        iconName: "dark_mode"
+                        iconSize: 20
+                        color: root.settings.theme.primary
+                        opacity: (root.settings.gaming && root.settings.gaming.enabled) ? 1.0 : 0.45
+                        tooltipText: "Gaming Mode"
+                        onClicked: {
+                            if (!root.settings.gaming) root.settings.gaming = { enabled: false, apps: [] }
+                            root.settings.gaming.enabled = !root.settings.gaming.enabled
+                            root.saveSettings()
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Text {
+                            text: "Gaming Mode"
+                            color: root.settings.theme.text
+                            font.family: root.settings.fontFamily
+                            font.weight: 500
+                            font.pixelSize: 14
+                        }
+                        Text {
+                            text: (root.settings.gaming && root.settings.gaming.enabled)
+                                ? "Bar minimised — click bar or toggle to exit"
+                                : "Hides the bar for distraction-free gaming"
+                            color: root.settings.theme.text
+                            opacity: 0.45
+                            font.family: root.settings.fontFamily
+                            font.pixelSize: 11
+                        }
+                    }
+
+                    Rectangle {
+                        property bool isOn: root.settings.gaming ? root.settings.gaming.enabled : false
+                        width: 44; height: 24; radius: 12
+                        color: isOn ? root.settings.theme.primary : Qt.rgba(1,1,1,0.15)
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                        Rectangle {
+                            width: 18; height: 18; radius: 9
+                            color: root.settings.theme.text
+                            anchors.verticalCenter: parent.verticalCenter
+                            x: parent.isOn ? parent.width - width - 3 : 3
+                            Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.InOutQuad } }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (!root.settings.gaming) root.settings.gaming = { enabled: false, apps: [] }
+                                root.settings.gaming.enabled = !root.settings.gaming.enabled
+                                root.saveSettings()
+                            }
+                        }
+                    }
+                }
+
+                Item { implicitHeight: 8 }
+
                 // ── QUICK ACCESS ──────────────────────────────────
                 TextDivider {
                     dividerText: "Quick Access"
