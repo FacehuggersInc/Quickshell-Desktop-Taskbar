@@ -33,7 +33,17 @@ Window {
         property string iconName: ""
         stdout: StdioCollector {
             onStreamFinished: {
-                // After writing to cache, trigger icon refresh in AppBar
+                var resolved = this.text.trim()
+                // Update the launcher entry with the resolved icon path
+                if (resolved && resolved !== "") {
+                    for (var i = 0; i < root.settings.launchers.length; i++) {
+                        if (root.settings.launchers[i].name === writeIconCacheProc.className) {
+                            root.settings.launchers[i].icon = resolved
+                            root.saveSettings()
+                            break
+                        }
+                    }
+                }
                 if (addAppWindow.onSaved) addAppWindow.onSaved()
             }
         }
@@ -85,24 +95,16 @@ Window {
     }
 
     function saveApp(name, command, icon, className, options, lockOptions, ignoreOptions, masqueUnder) {
-        // For installed apps (icon comes from .desktop file), try to resolve
-        // the icon name to a full path and write it directly to the cache.
-        // For custom apps with no icon, fall back to "*" for auto-lookup.
-        var resolvedIcon = "*"
-        if (icon && icon !== "" && icon !== "*") {
-            // icon from .desktop is a name like "code" or a full path
-            // Write it to cache so getappicons uses it directly
-            writeIconCacheProc.className = className
-            writeIconCacheProc.iconName  = icon
-            writeIconCacheProc.command   = root.newUtill(["--setappicon", className, icon])
-            writeIconCacheProc.running   = true
-            resolvedIcon = icon
-        }
+        // Always store "*" initially so QML shows the default icon
+        // and the icon resolution queue picks it up.
+        // If we have a .desktop icon name, run setappicon to resolve
+        // the real path — its stdout handler updates the launcher entry.
+        var hasDesktopIcon = icon && icon !== "" && icon !== "*"
 
         var entry = {
             name:     className,
             nickname: name,
-            icon:     resolvedIcon,
+            icon:     "*",
             command:  command,
             options:  options
         }
@@ -130,10 +132,17 @@ Window {
 
         root.saveSettings()
 
-        // If no icon to write, notify AppBar to rebuild immediately
-        // (if writing icon, onSaved is called from writeIconCacheProc.onStreamFinished)
-        if (resolvedIcon === "*") {
-            if (onSaved) onSaved()
+        // Trigger AppBar rebuild immediately so the new icon (as "*") appears
+        if (onSaved) onSaved()
+
+        // If we have a .desktop icon name, resolve it asynchronously.
+        // When setappicon returns, its stdout handler updates the launcher
+        // entry with the real path and triggers another rebuild.
+        if (hasDesktopIcon) {
+            writeIconCacheProc.className = className
+            writeIconCacheProc.iconName  = icon
+            writeIconCacheProc.command   = root.newUtill(["--setappicon", className, icon])
+            writeIconCacheProc.running   = true
         }
 
         addAppWindow.visible = false

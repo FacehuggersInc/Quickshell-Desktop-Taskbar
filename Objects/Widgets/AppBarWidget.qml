@@ -475,6 +475,83 @@ RoundedBlock{
         }
     }
 
+    // Sync the apps ListModel with settings.launchers without clearing.
+    // - Adds any new launcher that's missing from the list
+    // - Updates the icon on any launcher whose icon changed (e.g. resolved from "*")
+    // - Removes any pinned-only entry whose launcher was deleted (un-pinned)
+    // - Queues icon resolution for any "*" icons
+    function syncLaunchers() {
+        var launchers = root.settings.launchers
+
+        // Build a set of launcher names for quick lookup
+        var launcherNames = {}
+        for (var i = 0; i < launchers.length; i++) {
+            launcherNames[launchers[i].name] = true
+        }
+
+        // Remove apps whose launcher was deleted (un-pinned static-only entries)
+        for (var r = apps.count - 1; r >= 0; r--) {
+            var app = apps.get(r)
+            if (app.type.includes("static") && !launcherNames[app.name]) {
+                apps.remove(r)
+            }
+        }
+
+        // Add missing launchers / update changed icons
+        var needsIconProc = false
+        for (var i = 0; i < launchers.length; i++) {
+            var item = launchers[i]
+            if (!item.icon || !item.command || !item.name) continue
+
+            // Queue icon resolution for "*" icons
+            if (item.icon === "*" && !queuedAppClassesForIcons.includes(item.name)) {
+                queuedAppClassesForIcons.push(item.name)
+                needsIconProc = true
+            }
+
+            // Check if already in the list
+            var found = false
+            for (var j = 0; j < apps.count; j++) {
+                if (apps.get(j).name === item.name) {
+                    found = true
+                    // Update icon if it changed
+                    var currentIcon = apps.get(j).icon
+                    if (currentIcon !== item.icon) {
+                        apps.setProperty(j, "icon", item.icon)
+                    }
+                    break
+                }
+            }
+
+            if (!found) {
+                var matches = getPIDs(item.name)
+                var state = "static"
+                if (matches.length === 1) state = "static|active"
+                else if (matches.length > 1) state = "static|multi-active"
+
+                // Insert after the last pinned app (before non-pinned active apps)
+                var insertIdx = 0
+                for (var k = 0; k < apps.count; k++) {
+                    if (apps.get(k).type.includes("static")) insertIdx = k + 1
+                    else break
+                }
+                apps.insert(insertIdx, {
+                    name: item.name,
+                    nickname: item.nickname ? item.nickname : "",
+                    icon: item.icon,
+                    command: item.command,
+                    options: root.settings.launcherflags.ignoreOptions.includes(item.name)
+                        ? "[]" : encodeOptions(item.options),
+                    type: state,
+                    instanceCount: matches.length,
+                    hiddenCount: getHiddenCount(item.name)
+                })
+            }
+        }
+
+        if (needsIconProc) getAppIconsProc.getIcons(true)
+    }
+
     function openContextMenu(popupObject){
         var contextHiddenCount = getHiddenCount(contextTarget.name)
         var contextIsPinned = isAppPinned(contextTarget.name)
@@ -595,8 +672,13 @@ RoundedBlock{
 
     //CONTEXT MENU ACTIONS
     function launch(data, includeOptions=true, optionsIndex=0){
-        var opts = decodeOptions(data.options) 
-        var args = [data.command]
+        var opts = decodeOptions(data.options)
+        // data.command may be a multi-word string from a .desktop Exec field
+        // (e.g. "/usr/bin/flatpak run --branch=master ... com.app.Name")
+        // Split into a proper args array so execute doesn't try to find
+        // a binary whose name is the entire string.
+        var cmdStr = data.command.trim()
+        var args = cmdStr.includes(" ") ? cmdStr.split(/\s+/) : [cmdStr]
         if (includeOptions && opts.length > 0) {
             args = root.combine(args, opts[optionsIndex])
         }
@@ -867,8 +949,7 @@ RoundedBlock{
             if (modelData.action === "pin") {
                 togglePin(contextTarget)
                 root.saveSettings()
-                apps.clear()
-                addedStaticApps = false
+                syncLaunchers()
             } else if (modelData.action === "debug:data") {
                 var pids = getPIDs(contextTarget.name)
             } else if (modelData.action === "launch:with") {
@@ -943,8 +1024,7 @@ RoundedBlock{
     AddAppWindow {
         id: addAppWindow
         onSaved: function() {
-            apps.clear()
-            addedStaticApps = false
+            syncLaunchers()
         }
     }
 
@@ -1223,7 +1303,7 @@ RoundedBlock{
                         source: iconSource === "*" || iconSource === ""
                             ? root.iconSource("open_app")
                             : iconSource
-                        anchors.centerIn: parent 
+                        anchors.centerIn: parent
                         width: parent.width * 1.5
                         height: parent.height * 1.5
                         fillMode: Image.PreserveAspectFit

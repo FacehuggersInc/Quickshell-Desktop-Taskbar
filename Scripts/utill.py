@@ -25,10 +25,16 @@ CONFIG_JSON = CONFIG_DIR / "config.json"
 # Icon cache file
 ICON_CACHE = CONFIG_DIR / ".icon-path-cache"
 
-# Icon search roots — add any extra icon theme directories here
+# Icon search roots — covers system themes, Flatpak exports, and pixmaps
 ICON_ROOTS = [
     "/usr/share/icons",
+    "/usr/share/pixmaps",
+    "/usr/local/share/icons",
     f"/home/{USERNAME}/.local/share/icons",
+    # Flatpak — system-wide installs
+    "/var/lib/flatpak/exports/share/icons",
+    # Flatpak — per-user installs
+    f"/home/{USERNAME}/.local/share/flatpak/exports/share/icons",
 ]
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -475,12 +481,136 @@ class Utill():
     def build_icon_index(self):
         index = []
         for ROOT in ICON_ROOTS:
-            for root, _, files in os.walk(ROOT):
+            if not os.path.isdir(ROOT):
+                continue
+            # followlinks=True is essential — Flatpak export dirs are symlink trees
+            for dirpath, _, files in os.walk(ROOT, followlinks=True):
                 for file in files:
                     if not file.endswith(VALID_EXTS): continue
+                    full = os.path.join(dirpath, file)
                     name = os.path.splitext(file)[0].lower()
-                    index.append((name, os.path.join(root, file), self.extract_size(os.path.join(root, file))))
+                    index.append((name, full, self.extract_size(full)))
         return index
+
+    @staticmethod
+    def _icon_roots_fingerprint():
+        """Hash of ICON_ROOTS + their mtimes so the cache auto-rebuilds
+        when directories are added/changed (e.g. new Flatpak installed)."""
+        parts = []
+        for r in ICON_ROOTS:
+            try:
+                parts.append(f"{r}:{os.path.getmtime(r):.0f}")
+            except OSError:
+                parts.append(f"{r}:missing")
+        return "|".join(parts)
+
+    def _pick_best_icon(self, candidates):
+        """From a list of (name, path, size) tuples, pick the best icon.
+
+        Prefers:
+          1. Icons inside an 'apps' directory
+          2. Scalable (size 9999) or largest raster ≥ 48
+          3. PNG over SVG over XPM for raster; SVG fine for scalable
+        """
+        if not candidates:
+            return None
+
+        def sort_key(entry):
+            _, path, size = entry
+            in_apps = 1 if "/apps/" in path else 0
+            # Prefer hicolor as the universal fallback theme
+            in_hicolor = 1 if "/hicolor/" in path else 0
+            return (in_apps, in_hicolor, size)
+
+        return max(candidates, key=sort_key)
+
+    def resolve_icon_name(self, icon_name, index=None):
+        """Resolve a freedesktop icon name (or full path) to an icon file path.
+
+        Lookup order:
+          1. Already a valid file path → return as-is
+          2. /usr/share/pixmaps/ exact match (case-insensitive, any valid ext)
+          3. Exact name match in icon index (case-insensitive)
+          4. If name contains dots (e.g. org.gnome.Nautilus), try the last segment
+          5. If name contains hyphens (e.g. utilities-terminal), try last segment
+          6. Fuzzy match with high threshold (≥ 85) as last resort
+        Returns the path or empty string on failure.
+        """
+        if not icon_name:
+            return ""
+
+        # 1. Already a full path?
+        if os.path.isfile(icon_name):
+            return icon_name
+
+        # 2. Check /usr/share/pixmaps/ (many apps install icons here directly)
+        pixmaps_dir = "/usr/share/pixmaps"
+        if os.path.isdir(pixmaps_dir):
+            icon_lower = icon_name.lower()
+            for f in os.listdir(pixmaps_dir):
+                if not f.endswith(VALID_EXTS):
+                    continue
+                if os.path.splitext(f)[0].lower() == icon_lower:
+                    return os.path.join(pixmaps_dir, f)
+
+        # Build or reuse index
+        if index is None:
+            index = self.build_icon_index()
+
+        icon_lower = icon_name.lower()
+
+        # 3. Exact match in icon index
+        exact = [e for e in index if e[0] == icon_lower]
+        if exact:
+            best = self._pick_best_icon(exact)
+            if best:
+                return best[1]
+
+        # 4. Dotted names (e.g. com.hytale.Launcher, org.gnome.Nautilus)
+        #    Try segments from most-specific to least:
+        #    com.hytale.Launcher → try "launcher", then "hytale", then "com"
+        #    Also try joining the last two: "hytale.launcher" / "hytale-launcher"
+        if "." in icon_name:
+            segments = icon_name.split(".")
+            # Try individual segments from the right (skip single-char or too-short)
+            for seg in reversed(segments):
+                seg_lower = seg.lower()
+                if len(seg_lower) < 2 or seg_lower == icon_lower:
+                    continue
+                seg_exact = [e for e in index if e[0] == seg_lower]
+                if seg_exact:
+                    best = self._pick_best_icon(seg_exact)
+                    if best:
+                        return best[1]
+            # Try "appname-subname" style (e.g. "hytale-launcher")
+            if len(segments) >= 2:
+                hyphenated = (segments[-2] + "-" + segments[-1]).lower()
+                hyp_exact = [e for e in index if e[0] == hyphenated]
+                if hyp_exact:
+                    best = self._pick_best_icon(hyp_exact)
+                    if best:
+                        return best[1]
+
+        # 5. Try last segment of hyphenated names (utilities-terminal → terminal)
+        if "-" in icon_name:
+            last_seg = icon_name.rsplit("-", 1)[-1].lower()
+            if last_seg and last_seg != icon_lower:
+                seg_exact = [e for e in index if e[0] == last_seg]
+                if seg_exact:
+                    best = self._pick_best_icon(seg_exact)
+                    if best:
+                        return best[1]
+
+        # 6. Fuzzy match as last resort — high threshold to avoid wrong icons
+        names = [e[0] for e in index]
+        matches = process.extract(icon_lower, names, scorer=fuzz.WRatio, limit=10)
+        candidates = [index[idx] for _, score, idx in matches if score >= 85]
+        if candidates:
+            best = self._pick_best_icon(candidates)
+            if best:
+                return best[1]
+
+        return ""
 
     @argfunc
     def getappicons(self, *args):
@@ -498,6 +628,7 @@ class Utill():
         cache      = {"apps": {}, "index": []}
         save_cache = False
         cachepath  = ICON_CACHE
+        fingerprint = self._icon_roots_fingerprint()
 
         if cachepath.exists():
             try:
@@ -506,7 +637,15 @@ class Utill():
                 # Cache is corrupted — delete and rebuild from scratch
                 cachepath.unlink(missing_ok=True)
                 save_cache = True
-                cache = {"apps": {}, "index": self.build_icon_index()}
+                cache = {"apps": {}, "index": self.build_icon_index(), "_roots": fingerprint}
+
+            # Invalidate index if ICON_ROOTS changed (new dirs, new Flatpak, etc.)
+            if cache.get("_roots") != fingerprint:
+                cache["index"] = self.build_icon_index()
+                cache["_roots"] = fingerprint
+                # Clear all cached app→icon mappings so they re-resolve
+                cache["apps"] = {}
+                save_cache = True
 
             # Remove requested classes from cache so they get re-resolved
             if clear_cache:
@@ -522,21 +661,21 @@ class Utill():
         else:
             save_cache = True
             cache['index'] = self.build_icon_index()
+            cache['_roots'] = fingerprint
 
         # Rebuild index if empty (e.g. cache existed but index was cleared)
         if not cache['index']:
             cache['index'] = self.build_icon_index()
+            cache['_roots'] = fingerprint
             save_cache = True
 
-        names = [e[0] for e in cache['index']]
+        index = cache['index']
         for cls in classnames:
-            matches    = process.extract(cls.lower(), names, scorer=fuzz.WRatio, limit=20)
-            candidates = [cache['index'][idx] for _, score, idx in matches if score >= 70]
-            if not candidates: continue
-            best = next((c for c in candidates if c[2] >= 90), None) or max(candidates, key=lambda x: x[2])
-            cache['apps'][cls] = best[1]
-            save_cache = True
-            results.append(f"{cls}:{best[1]}")
+            resolved = self.resolve_icon_name(cls, index)
+            if resolved:
+                cache['apps'][cls] = resolved
+                save_cache = True
+                results.append(f"{cls}:{resolved}")
 
         if save_cache:
             with open(cachepath, "w") as f: json.dump(cache, f, indent=4)
@@ -557,6 +696,7 @@ class Utill():
         icon = args[1].strip()
 
         cachepath = ICON_CACHE
+        fingerprint = self._icon_roots_fingerprint()
 
         # Load or build cache
         cache = {"apps": {}, "index": []}
@@ -568,27 +708,17 @@ class Utill():
                 cachepath.unlink(missing_ok=True)
                 cache = {"apps": {}, "index": []}
 
-        if not cache.get("index"):
+        # Rebuild index if stale or missing
+        if not cache.get("index") or cache.get("_roots") != fingerprint:
             cache["index"] = self.build_icon_index()
+            cache["_roots"] = fingerprint
 
-        # If icon is already a full path that exists, use it directly
-        if os.path.isfile(icon):
-            cache["apps"][cls] = icon
+        resolved = self.resolve_icon_name(icon, cache["index"])
+        if resolved:
+            cache["apps"][cls] = resolved
             with open(cachepath, "w") as f:
                 json.dump(cache, f, indent=4)
-            return icon
-
-        # Otherwise treat as a system icon name — fuzzy match against index
-        names = [e[0] for e in cache["index"]]
-        from rapidfuzz import fuzz, process as rfprocess
-        matches = rfprocess.extract(icon.lower(), names, scorer=fuzz.WRatio, limit=10)
-        candidates = [cache["index"][idx] for _, score, idx in matches if score >= 60]
-        if candidates:
-            best = next((c for c in candidates if c[2] >= 90), None) or max(candidates, key=lambda x: x[2])
-            cache["apps"][cls] = best[1]
-            with open(cachepath, "w") as f:
-                json.dump(cache, f, indent=4)
-            return best[1]
+            return resolved
 
         return ""
 
