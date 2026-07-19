@@ -70,7 +70,7 @@ PanelWindow {
 
     Timer {
         id: gamingRevealTimer
-        interval: 1000
+        interval: 300
         onTriggered: mainWindow.gamingBarRevealed = true
     }
 
@@ -79,18 +79,22 @@ PanelWindow {
         id: gamingBar
         anchors.fill: parent
         visible: mainWindow.gamingMode && mainWindow.gamingBarRevealed
-        color: root.settings.theme.surface
-        opacity: 0.25
+        // Use alpha in color, NOT the opacity property — opacity cascades
+        // into children and makes the clock/dot invisible
+        color: {
+            var c = root.settings.theme.surface
+            return Qt.rgba(c.r, c.g, c.b, 0.25)
+        }
 
         // Subtle clock
         Text {
             id: gamingClock
             anchors.centerIn: parent
             color: root.settings.theme.text
-            opacity: 0.35
+            opacity: 1.0
             font.family: root.settings.fontFamily
-            font.weight: 500
-            font.pixelSize: 10
+            font.weight: 600
+            font.pixelSize: 11
 
             Process {
                 id: gamingClockProc
