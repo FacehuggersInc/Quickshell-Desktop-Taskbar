@@ -1525,7 +1525,7 @@ PopupWindow {
                     description: on ? "currently on" : "currently off"
                     onClicked: {
                         on = !on
-                        root.execute(["hyprctl", "keyword", "animations:enabled", on ? "true" : "false"])
+                        root.execute(root.cmd("hypr_set_animations", {"value": on ? "true" : "false"}))
                     }
                 }
                 ActionRow {
@@ -1536,7 +1536,7 @@ PopupWindow {
                     description: on ? "currently on" : "currently off"
                     onClicked: {
                         on = !on
-                        root.execute(["hyprctl", "keyword", "decoration:blur:enabled", on ? "true" : "false"])
+                        root.execute(root.cmd("hypr_set_blur", {"value": on ? "true" : "false"}))
                     }
                 }
 

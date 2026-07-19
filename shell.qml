@@ -24,7 +24,14 @@ ShellRoot {
         onAdapterUpdated: this.writeAdapter()
     }
     property var settings: JSON.parse(configFile.text()) 
-    property var utill: ["python3", "/home/fach/.config/quickshell/Scripts/utill.py"]
+    property var utill: {
+        var interpreter = (settings.utill && settings.utill.interpreter)
+            ? settings.utill.interpreter : "python3"
+        var script = (settings.utill && settings.utill.path)
+            ? settings.utill.path
+            : Qt.resolvedUrl("./Scripts/utill.py").toString().replace("file://", "")
+        return [interpreter, script]
+    }
     property bool initialDarkHourCheck: false
     property var monitorResolutions: ({})  // name -> {w, h}
     property var ddcMap: ({})              // connector name -> DDC display number

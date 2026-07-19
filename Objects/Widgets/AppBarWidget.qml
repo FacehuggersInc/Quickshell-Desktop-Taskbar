@@ -30,6 +30,7 @@ RoundedBlock{
     // Gaming mode runtime state (not saved — resets each session)
     property bool gamingAppActive: false   // true when any gaming app class is in appStore
     property bool gamingUserPaused: false  // true when user manually exited while a game runs
+    property var  gamingBlockedApps: ([])  // class names blocked from re-triggering until they close
 
     // Args that are never meaningful to save as launch options —
     // typically DBus activation, daemon, or session-management flags
@@ -344,13 +345,14 @@ RoundedBlock{
             if (isAppPinned(name)) {
                 
                 //Update Pinned Settings
+                var _flags = root.settings.launcherflags || {}
                 for (var i = 0; i < root.settings.launchers.length; i++) {
                     var pinned = root.settings.launchers[i]
                     if (pinned.name !== name)
                         continue
 
-                    if (root.settings.launcherflags.lockOptions.includes(name)) break
-                    if (root.settings.launcherflags.ignoreOptions.includes(name)) {
+                    if (root.settings.launcherflags.lockOptions && root.settings.launcherflags.lockOptions.includes(name)) break
+                    if (root.settings.launcherflags.ignoreOptions && root.settings.launcherflags.ignoreOptions.includes(name)) {
                         var hadOptions = pinned.options.length > 0
                         if (hadOptions) {
                             pinned.options = []
@@ -358,7 +360,7 @@ RoundedBlock{
                         }
                         break
                     }
-                    var filters = root.settings.launcherflags.filters[name]
+                    var filters = root.settings.launcherflags.filters ? root.settings.launcherflags.filters[name] : undefined
                     if (filters && filters.length > 0){
                         var includesFilter = false
                         for (var i=0; i < filters.length; i++){
@@ -382,13 +384,13 @@ RoundedBlock{
                         }
                     }
 
-                    if (root.settings.launcherflags.setOptions[name] != undefined && newOptions.length + existingOptions.length >= root.settings.launcherflags.setOptions[name]){
+                    if (root.settings.launcherflags.setOptions && root.settings.launcherflags.setOptions[name] != undefined && newOptions.length + existingOptions.length >= root.settings.launcherflags.setOptions[name]){
                         break
                     }
 
                     if (!exists) {
                         existingOptions.unshift(newOptions[0])
-                        if (existingOptions.length > root.settings.launcherflags.maxOptions){
+                        if (existingOptions.length > ( root.settings.launcherflags.maxOptions || 10 )){
                             existingOptions = existingOptions.slice(0, -1)
                         }
                         pinned.options = existingOptions
@@ -408,7 +410,7 @@ RoundedBlock{
                     nickname: "",
                     icon: parts[2],
                     command: parsed.command,
-                    options: root.settings.launcherflags.ignoreOptions.includes(name) ? "[]" : encodeOptions(parsed.options),
+                    options: root.settings.launcherflags.ignoreOptions && root.settings.launcherflags.ignoreOptions.includes(name) ? "[]" : encodeOptions(parsed.options),
                     type: "active",
                     instanceCount: instances.length,
                     hiddenCount: getHiddenCount(name)
@@ -424,7 +426,7 @@ RoundedBlock{
                             nickname: app.nickname,
                             icon: app.icon,
                             command: app.command,
-                            options: root.settings.launcherflags.ignoreOptions.includes(name) ? "[]" : encodeOptions(parsed.options),
+                            options: root.settings.launcherflags.ignoreOptions && root.settings.launcherflags.ignoreOptions.includes(name) ? "[]" : encodeOptions(parsed.options),
                             type: app.type,
                             instanceCount: instances.length,
                             hiddenCount: getHiddenCount(app.name)
@@ -465,7 +467,7 @@ RoundedBlock{
                     nickname: item.nickname ? item.nickname : "",
                     icon: item.icon,
                     command: item.command,
-                    options: root.settings.launcherflags.ignoreOptions.includes(item.name) ? "[]" : encodeOptions(item.options),
+                    options: root.settings.launcherflags.ignoreOptions && root.settings.launcherflags.ignoreOptions.includes(item.name) ? "[]" : encodeOptions(item.options),
                     type: state,
                     instanceCount: matches.length,
                     hiddenCount: getHiddenCount(item.name)
@@ -485,8 +487,6 @@ RoundedBlock{
     }
 
     // ── Gaming mode auto-trigger ────────────────────────────────────
-    // Checks if any app in settings.gaming.apps is currently active,
-    // including apps that are masqued under a different pinned app.
     function checkGamingMode() {
         if (!root.settings.gaming) return
         var gamingApps = root.settings.gaming.apps || []
@@ -495,46 +495,83 @@ RoundedBlock{
             return
         }
 
-        var anyActive = false
-        for (var i = 0; i < gamingApps.length && !anyActive; i++) {
+        // Build set of currently-active gaming app class names
+        // (checks both top-level appStore keys and masqued proc names)
+        var activeGamingApps = []
+        for (var i = 0; i < gamingApps.length; i++) {
             var gamingApp = gamingApps[i]
-            // Direct match in appStore
+            var found = false
             if (appStore[gamingApp] && appStore[gamingApp].procs.length > 0) {
-                anyActive = true
-                break
-            }
-            // Check inside masqued entries — the proc's original class name
-            // is stored in proc.name even when reassigned to a parent
-            for (var key in appStore) {
-                var procs = appStore[key].procs
-                for (var j = 0; j < procs.length; j++) {
-                    if (procs[j].name === gamingApp) {
-                        anyActive = true
-                        break
+                found = true
+            } else {
+                for (var key in appStore) {
+                    var procs = appStore[key].procs
+                    for (var j = 0; j < procs.length; j++) {
+                        if (procs[j].name === gamingApp) { found = true; break }
                     }
+                    if (found) break
                 }
-                if (anyActive) break
+            }
+            if (found) activeGamingApps.push(gamingApp)
+        }
+
+        // Clear blocks for games that have closed
+        for (var b = gamingBlockedApps.length - 1; b >= 0; b--) {
+            if (!activeGamingApps.includes(gamingBlockedApps[b])) {
+                gamingBlockedApps.splice(b, 1)
+            }
+        }
+
+        // Check if any non-blocked gaming app is active
+        var anyUnblocked = false
+        for (var i = 0; i < activeGamingApps.length; i++) {
+            if (!gamingBlockedApps.includes(activeGamingApps[i])) {
+                anyUnblocked = true
+                break
             }
         }
 
         var wasActive = gamingAppActive
-        gamingAppActive = anyActive
+        gamingAppActive = activeGamingApps.length > 0
 
-        if (anyActive && !wasActive) {
-            // A gaming app just appeared — auto-enable (fresh start, clear pause)
+        if (anyUnblocked && !wasActive) {
+            // A gaming app just appeared — auto-enable
             gamingUserPaused = false
             root.settings.gaming.enabled = true
             root.saveSettings()
-        } else if (anyActive && !root.settings.gaming.enabled && !gamingUserPaused) {
-            // Gaming app still running, mode got disabled externally but user didn't pause
+        } else if (anyUnblocked && !root.settings.gaming.enabled && !gamingUserPaused) {
+            // Gaming app running, mode disabled externally, user didn't pause
             root.settings.gaming.enabled = true
             root.saveSettings()
-        } else if (!anyActive && wasActive) {
-            // All gaming apps closed — disable and clear pause
+        } else if (activeGamingApps.length === 0 && wasActive) {
+            // All gaming apps closed — full reset
             gamingUserPaused = false
+            gamingBlockedApps = []
             if (root.settings.gaming.enabled) {
                 root.settings.gaming.enabled = false
                 root.saveSettings()
+            }
+        }
+    }
+
+    // Block all currently-active gaming apps from re-triggering
+    function blockActiveGamingApps() {
+        var gamingApps = root.settings.gaming ? root.settings.gaming.apps || [] : []
+        for (var i = 0; i < gamingApps.length; i++) {
+            var gamingApp = gamingApps[i]
+            var found = false
+            if (appStore[gamingApp] && appStore[gamingApp].procs.length > 0) found = true
+            if (!found) {
+                for (var key in appStore) {
+                    var procs = appStore[key].procs
+                    for (var j = 0; j < procs.length; j++) {
+                        if (procs[j].name === gamingApp) { found = true; break }
+                    }
+                    if (found) break
+                }
+            }
+            if (found && !gamingBlockedApps.includes(gamingApp)) {
+                gamingBlockedApps.push(gamingApp)
             }
         }
     }
@@ -625,7 +662,7 @@ RoundedBlock{
                     nickname: item.nickname ? item.nickname : "",
                     icon: item.icon,
                     command: item.command,
-                    options: root.settings.launcherflags.ignoreOptions.includes(item.name)
+                    options: root.settings.launcherflags.ignoreOptions && root.settings.launcherflags.ignoreOptions.includes(item.name)
                         ? "[]" : encodeOptions(item.options),
                     type: state,
                     instanceCount: matches.length,
@@ -654,7 +691,7 @@ RoundedBlock{
         if (contextTarget.options && contextTarget.options.length > 0) {
             var jumpItems = []
             for (var i = 0; i < contextTarget.options.length; i++) {
-                if (i > root.settings.launcherflags.maxOptions) break
+                if (i > ( root.settings.launcherflags.maxOptions || 10 )) break
                 var index = contextTarget.options.length - 1 - i
                 var optSet = contextTarget.options[index]
                 jumpItems.push({"name": optSet[0], "action":"launch:custom", "icon":"terminal", "index": index})
@@ -835,7 +872,7 @@ RoundedBlock{
     }
 
     function killApp(pid){
-        root.execute(["kill", pid])
+        root.execute(root.cmd("kill_process", {"pid": pid}))
     }
 
     function closeApp(index, name){
@@ -843,7 +880,7 @@ RoundedBlock{
         var instance = state.procs[index]
         // Close by hyprland window address — exact, no fuzzy matching needed
         if (instance.address) {
-            root.execute(['hyprctl', 'dispatch', 'closewindow', 'address:' + instance.address])
+            root.execute(root.cmd("hypr_close_window", {"address": instance.address}))
         } else {
             // Fallback for windows without address data
             var title = instance.windowTitle
@@ -860,15 +897,15 @@ RoundedBlock{
         if (pidAppState){
             pidAppState['lastWorkspace'] = pidAppState['workspace'].trim()
         }
-        root.execute(['hyprctl', 'dispatch', 'movetoworkspacesilent', 'special:hidden,pid:' + pid])
+        root.execute(root.cmd("hypr_hide_window", {"pid": pid}))
     }
 
     function showInDefault(pid){
         var pidAppState = getAppStateFromPID(pid)
         if (pidAppState.lastWorkspace){
-            root.execute(['hyprctl', 'dispatch', 'movetoworkspacesilent', pidAppState['lastWorkspace'].trim()+',pid:'+pid])
+            root.execute(root.cmd("hypr_move_window", {"workspace": pidAppState['lastWorkspace'].trim(), "pid": pid}))
         } else {
-            root.execute(['hyprctl', 'dispatch', 'movetoworkspacesilent', 1+',pid:'+pid])
+            root.execute(root.cmd("hypr_move_window", {"workspace": "1", "pid": pid}))
         }
     }
 
@@ -887,11 +924,13 @@ RoundedBlock{
     }
 
     function appHasNoOptionsFlag(name){
-        return root.settings.launcherflags.ignoreOptions.includes(name)
+        return root.settings.launcherflags.ignoreOptions && root.settings.launcherflags.ignoreOptions.includes(name)
     }
 
     function toggleNoOptions(name){
-        if (root.settings.launcherflags.lockOptions.includes(name)) return
+        if (!root.settings.launcherflags) return
+        if (root.settings.launcherflags.lockOptions && root.settings.launcherflags.lockOptions.includes(name)) return
+        if (!root.settings.launcherflags.ignoreOptions) root.settings.launcherflags.ignoreOptions = []
         if (appHasNoOptionsFlag(name)) {
             for (var j = 0; j < root.settings.launcherflags.ignoreOptions.length; j++){
                 if (name === root.settings.launcherflags.ignoreOptions[j]){
@@ -1467,11 +1506,8 @@ RoundedBlock{
             }
         }
 
-        // ── Gaming mode re-enter button ─────────────────────────────
-        // Visible when a gaming app is running but the user manually
-        // exited gaming mode. Click to go back into gaming mode.
-        // Also stays visible if gamingUserPaused is set, even during
-        // brief appStore rebuilds, to prevent flickering.
+        // ── Gaming mode buttons ─────────────────────────────────────
+        // Re-enter: visible when paused, click to go back into gaming mode
         IconButton {
             id: gamingModeButton
             iconName: "dark_mode"
@@ -1480,11 +1516,31 @@ RoundedBlock{
             color: root.settings.theme.primary
             visible: (appBarWidget.gamingAppActive || appBarWidget.gamingUserPaused)
                 && !(root.settings.gaming && root.settings.gaming.enabled)
+                && appBarWidget.gamingUserPaused
             onClicked: {
                 appBarWidget.gamingUserPaused = false
+                // Re-entering clears all blocks (user is choosing to go back)
+                appBarWidget.gamingBlockedApps = []
                 if (!root.settings.gaming) root.settings.gaming = { enabled: false, apps: [] }
                 root.settings.gaming.enabled = true
                 root.saveSettings()
+            }
+        }
+
+        // Early exit: visible when paused with a game running, click to block
+        // the game from re-triggering until it closes
+        IconButton {
+            id: gamingExitButton
+            iconName: "stop"
+            iconSize: 22
+            tooltipText: "Stop Gaming Mode (won't re-trigger until game closes)"
+            color: root.settings.theme.text
+            visible: appBarWidget.gamingAppActive
+                && !(root.settings.gaming && root.settings.gaming.enabled)
+                && appBarWidget.gamingUserPaused
+            onClicked: {
+                appBarWidget.blockActiveGamingApps()
+                appBarWidget.gamingUserPaused = false
             }
         }
 

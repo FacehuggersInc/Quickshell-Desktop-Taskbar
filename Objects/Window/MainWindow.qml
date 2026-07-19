@@ -58,7 +58,11 @@ PanelWindow {
         }
         onClicked: {
             if (mainWindow.gamingBarRevealed) {
-                appbar.gamingUserPaused = true
+                // If a gaming app triggered this, just pause (show re-enter button)
+                // If settings-triggered (no game running), fully exit
+                if (appbar.gamingAppActive) {
+                    appbar.gamingUserPaused = true
+                } 
                 root.settings.gaming.enabled = false
                 root.saveSettings()
                 mainWindow.gamingBarRevealed = false
@@ -70,7 +74,7 @@ PanelWindow {
 
     Timer {
         id: gamingRevealTimer
-        interval: 300
+        interval: 1000
         onTriggered: mainWindow.gamingBarRevealed = true
     }
 
@@ -91,7 +95,6 @@ PanelWindow {
             id: gamingClock
             anchors.centerIn: parent
             color: root.settings.theme.text
-            opacity: 1.0
             font.family: root.settings.fontFamily
             font.weight: 600
             font.pixelSize: 11

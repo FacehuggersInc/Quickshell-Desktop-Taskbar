@@ -21,7 +21,7 @@ Item {
     // ── Fetch workspace + window data ─────────────────────────────
     Process {
         id: workspaceProc
-        command: ["hyprctl", "workspaces", "-j"]
+        command: root.cmd("hypr_list_workspaces")
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
@@ -43,7 +43,7 @@ Item {
 
     Process {
         id: activeProc
-        command: ["hyprctl", "activeworkspace", "-j"]
+        command: root.cmd("hypr_active_workspace")
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
@@ -77,15 +77,14 @@ Item {
     }
 
     function switchTo(id) {
-        root.execute(["hyprctl", "dispatch", "workspace", String(id)])
+        root.execute(root.cmd("hypr_switch_workspace", {"id": String(id)}))
     }
 
     function createWorkspace() {
-        // Find next unused number
         var ids = workspaceData.map(function(w) { return w.id })
         var next = 1
         while (ids.indexOf(next) !== -1) next++
-        root.execute(["hyprctl", "dispatch", "workspace", String(next)])
+        root.execute(root.cmd("hypr_switch_workspace", {"id": String(next)}))
     }
 
     // ── Dot pager ─────────────────────────────────────────────────

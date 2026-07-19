@@ -69,7 +69,7 @@ PopupWindow {
 
     Process {
         id: wsListProc
-        command: ["hyprctl", "workspaces", "-j"]
+        command: root.cmd("hypr_list_workspaces")
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
@@ -93,8 +93,8 @@ PopupWindow {
 
     function sendToWorkspace(wsId) {
         var dispatch = targetPid !== ""
-            ? ["hyprctl", "dispatch", "movetoworkspacesilent", wsId + ",pid:" + targetPid]
-            : ["hyprctl", "dispatch", "movetoworkspacesilent", wsId + ",class:" + targetClass]
+            ? root.cmd("hypr_move_window", {"workspace": wsId, "pid": targetPid})
+            : root.cmd("hypr_move_window_class", {"workspace": wsId, "class": targetClass})
         root.execute(dispatch)
         workspaceSendPopup.forceClose()
     }

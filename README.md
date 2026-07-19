@@ -304,25 +304,51 @@ If you have not yet created `config.json` see [Installation](#4-installation) ab
         "editor":  "code"                        // reference as {v-editor} — swap to change editor everywhere
     },
     "commands": {
-        "terminal":          "ghostty",          // required
-        "terminal_run":      "ghostty -e bash -c", // required
-        "wallpaper_set":     "awww img -o {display} {wallpaper}", // required if cycling
-        "screenshot":        "hyprshot -m region --clipboard-only -z",
-        "files":             "nautilus",
-        "files_open":        "nautilus {path}",
-        "colorpicker":       "hyprpicker",
-        "editor":            "{v-editor}",
-        "config_json":       "{v-editor} {v-home}/.config/quickshell/config.json",
-        "config_main":       "{v-editor} {v-home}/.config/",
-        "config_hypr":       "{v-editor} {v-home}/.config/hypr/",
-        "config_quickshell": "{v-editor} {v-home}/.config/quickshell/",
-        "lock":              "loginctl lock-session",
-        "suspend":           "systemctl suspend",
-        "reboot":            "systemctl reboot",
-        "poweroff":          "systemctl poweroff",
-        "logout":            "bash -c command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch exit",
-        "restart_shell":     "{v-home}/.config/quickshell/Scripts/restart.sh",
-        "hypr_reload":       "hyprctl reload"
+        // App launchers
+        "terminal":             "ghostty",
+        "terminal_run":         "ghostty -e bash -c",
+        "files":                "nautilus",
+        "files_open":           "nautilus {path}",
+        "editor":               "{v-editor}",
+        "screenshot":           "hyprshot -m region --clipboard-only -z",
+        "colorpicker":          "hyprpicker",
+        "wallpaper_set":        "awww img -o {display} {wallpaper}",
+
+        // Config editors
+        "config_json":          "{v-editor} {v-home}/.config/quickshell/config.json",
+        "config_main":          "{v-editor} {v-home}/.config/",
+        "config_hypr":          "{v-editor} {v-home}/.config/hypr/",
+        "config_quickshell":    "{v-editor} {v-home}/.config/quickshell/",
+
+        // Hyprland — workspace & window management
+        "hypr_switch_workspace":"hyprctl dispatch workspace {id}",
+        "hypr_list_workspaces": "hyprctl workspaces -j",
+        "hypr_active_workspace":"hyprctl activeworkspace -j",
+        "hypr_hide_window":     "hyprctl dispatch movetoworkspacesilent special:hidden,pid:{pid}",
+        "hypr_move_window":     "hyprctl dispatch movetoworkspacesilent {workspace},pid:{pid}",
+        "hypr_move_window_class":"hyprctl dispatch movetoworkspacesilent {workspace},class:{class}",
+        "hypr_close_window":    "hyprctl dispatch closewindow address:{address}",
+        "hypr_set_animations":  "hyprctl keyword animations:enabled {value}",
+        "hypr_set_blur":        "hyprctl keyword decoration:blur:enabled {value}",
+        "hypr_reload":          "hyprctl reload",
+
+        // Audio & media
+        "audio_set_volume":     "wpctl set-volume {id} {value}",
+        "audio_set_default":    "wpctl set-default {index}",
+        "media_previous":       "playerctl previous",
+        "media_toggle":         "playerctl play-pause",
+        "media_next":           "playerctl next",
+
+        // Process management
+        "kill_process":         "kill {pid}",
+
+        // Session
+        "lock":                 "loginctl lock-session",
+        "logout":               "bash -c command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch exit",
+        "suspend":              "systemctl suspend",
+        "reboot":               "systemctl reboot",
+        "poweroff":             "systemctl poweroff",
+        "restart_shell":        "{v-home}/.config/quickshell/Scripts/restart.sh"
     },
     "iconsPath":       "/path/to/icons/",        // required — trailing slash needed
     "fontFamily":      "JetBrainsMono",          // required
@@ -347,6 +373,10 @@ If you have not yet created `config.json` see [Installation](#4-installation) ab
         "enabled":   false,              // whether gaming mode is currently active
         "barHeight": 14,                 // height in px of the revealed gaming bar (default 14)
         "apps":      []                  // class names that auto-trigger gaming mode
+    },
+    "utill": {
+        "interpreter": "python3",        // interpreter for the utility script (default "python3")
+        "path": ""                       // full path to utill.py — empty string auto-resolves to ./Scripts/utill.py
     },
     "launcherflags": {
         "maxOptions":    3,
@@ -388,19 +418,7 @@ Any `{v-key}` that doesn't match a key in `variables` is left as-is.
 >
 > You can use these in any command value. Custom placeholders are also supported — add `{anything}` to a command string and pass the value when calling `root.cmd("key", {"anything": "value"})` from QML.
 
-> **Other commands used internally** — the following are called directly in QML without going through the `commands` map and cannot be overridden from config:
-> - `hyprctl dispatch workspace {n}` — workspace switching
-> - `hyprctl dispatch movetoworkspacesilent` — sending windows between workspaces
-> - `hyprctl keyword` — toggling animations and blur
-> - `wpctl set-volume` / `wpctl set-default` — audio control
-> - `playerctl previous/play-pause/next` — media controls
-> - `bluetoothctl` — all bluetooth operations (via `utill.py`)
-> - `ddcutil` — all brightness operations (via `utill.py`)
-> - `udisksctl mount` — USB mounting (via `utill.py`)
-> - `notify-send` — desktop notifications
-> - `kill {pid}` — force-closing apps
-> - `hyprctl dispatch closewindow address:{addr}` — closing individual windows by their Hyprland address
-> - `rm -f` — cleaning up smart crop temp files
+> **Other commands used internally** — `bluetoothctl`, `ddcutil`, `udisksctl mount`, and `notify-send` are called from `utill.py` and not overridden from the config commands map. `rm -f` is used only for cleaning up smart crop temp files.
 
 ---
 
@@ -521,7 +539,13 @@ Gaming mode hides the bar to get out of the way during fullscreen or borderless-
 
 **Masqued games** — if a game is masqued under another app (e.g. `HytaleClient` masqued under `HytaleLauncher`), the gaming trigger checks process-level class names, not just app bar entries. Toggle gaming mode for masqued apps via the parent's context menu → **Masque** sub-menu → **ClassName Gaming: ON/OFF**.
 
-**Re-enter button** — when you click the revealed bar to exit gaming mode while a game is still running, a gaming mode icon appears on the app bar. Click it to re-enter gaming mode without reopening settings or the game. The icon disappears when the game closes.
+**Re-enter button** — when you click the revealed bar to exit gaming mode while a game is still running, two icons appear on the app bar:
+- A **re-enter** button (primary color) — click to go back into gaming mode, clearing any blocks
+- An **early exit** button (stop icon) — click to permanently exit gaming mode for this session. The game is blocked from re-triggering gaming mode until it closes. Once the game closes, the block is cleared and the next launch will trigger gaming mode normally.
+
+If gaming mode was activated from the Settings panel (no game running), clicking the revealed bar exits fully — no re-enter button appears.
+
+If gaming mode is re-enabled from Settings while a blocked game is still running, the block is cleared and gaming mode resumes as if the game triggered it fresh.
 
 **Config:**
 
@@ -533,7 +557,56 @@ Gaming mode hides the bar to get out of the way during fullscreen or borderless-
 
 ---
 
-## 13. Timers & Reactivity
+## 13. Commands & Paths
+
+All external commands the shell executes are defined in `config.json` under the `commands` key. Each command is a string that supports two kinds of substitution:
+
+- **`{placeholder}`** — replaced at call time with a value from the caller (e.g. `{pid}`, `{address}`, `{path}`, `{workspace}`)
+- **`{v-varname}`** — replaced from `config.json`'s `variables` object (e.g. `{v-configPath}`)
+
+If a command contains shell operators (`&&`, `||`, `|`, `;`, `>`), it is automatically wrapped in `bash -c "..."`.
+
+### Key commands
+
+| Key | Default | Placeholders |
+|---|---|---|
+| `kill_process` | `kill {pid}` | `{pid}` — process ID |
+| `hypr_close_window` | `hyprctl dispatch closewindow address:{address}` | `{address}` — Hyprland window address |
+| `hypr_hide_window` | `hyprctl dispatch movetoworkspacesilent special:hidden,pid:{pid}` | `{pid}` |
+| `hypr_move_window` | `hyprctl dispatch movetoworkspacesilent {workspace},pid:{pid}` | `{workspace}`, `{pid}` |
+| `hypr_move_window_class` | `hyprctl dispatch movetoworkspacesilent {workspace},class:{class}` | `{workspace}`, `{class}` |
+| `hypr_switch_workspace` | `hyprctl dispatch workspace {id}` | `{id}` — workspace number |
+| `hypr_list_workspaces` | `hyprctl workspaces -j` | — (returns JSON) |
+| `hypr_active_workspace` | `hyprctl activeworkspace -j` | — (returns JSON) |
+| `hypr_set_animations` | `hyprctl keyword animations:enabled {value}` | `{value}` — `true` or `false` |
+| `hypr_set_blur` | `hyprctl keyword decoration:blur:enabled {value}` | `{value}` — `true` or `false` |
+| `audio_set_volume` | `wpctl set-volume {id} {value}` | `{id}` — PipeWire node ID, `{value}` — 0–1.0 |
+| `audio_set_default` | `wpctl set-default {index}` | `{index}` — PipeWire node index |
+| `media_previous` | `playerctl previous` | — |
+| `media_toggle` | `playerctl play-pause` | — |
+| `media_next` | `playerctl next` | — |
+| `files` | `dolphin` | — |
+| `files_open` | `dolphin {path}` | `{path}` — directory path |
+| `terminal` | `kitty` | — |
+| `screenshot` | `grimblast --notify copy area` | — |
+| `colorpicker` | `hyprpicker -a` | — |
+
+### Utility script
+
+The Python utility script path is configured in the `utill` key:
+
+```json
+"utill": {
+    "interpreter": "python3",
+    "path": ""
+}
+```
+
+When `path` is empty (default), the shell auto-resolves to `./Scripts/utill.py` relative to the shell config directory. Set an absolute path if you've moved the script elsewhere.
+
+---
+
+## 14. Timers & Reactivity
 
 Most polling uses `Timer` components with fixed intervals. These control how quickly the UI reacts to changes — lower means faster updates but more subprocess calls. **If the default intervals feel too slow or too aggressive for your system, change them directly in the file listed.**
 
@@ -557,7 +630,7 @@ Most polling uses `Timer` components with fixed intervals. These control how qui
 
 ---
 
-## 14. First Run
+## 15. First Run
 
 On the first launch `.icon-path-cache` does not exist yet. `AppBarWidget` will call `--getappicons` which walks your icon theme directories, Flatpak export paths, and `/usr/share/pixmaps/` — recording each icon's name and path. This is a one-time operation and may take a few seconds. Subsequent launches read from the cache and are fast. The cache stores only class name → icon path mappings, not icon image data.
 
@@ -567,7 +640,7 @@ The cache auto-invalidates when the icon directories change (e.g. a new Flatpak 
 
 ---
 
-## 15. Run
+## 16. Run
 
 ```bash
 quickshell

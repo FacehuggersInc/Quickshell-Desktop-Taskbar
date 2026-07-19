@@ -49,7 +49,7 @@ RowLayout{
             return root.media.title + " : " + root.media.artist
         }
         onClicked: toggleCommand.running = true
-        Process { id: toggleCommand; command: ["playerctl", "play-pause"] }
+        Process { id: toggleCommand; command: root.cmd("media_toggle") }
     }
 
     IconButton {

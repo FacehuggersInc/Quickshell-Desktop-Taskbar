@@ -100,11 +100,11 @@ PopupWindow {
     }
 
     function setVolume(id, value) {
-        root.execute(["wpctl", "set-volume", id, value / 100])
+        root.execute(root.cmd("audio_set_volume", {"id": id, "value": value / 100}))
     }
 
     function setDevice(index, closeAfter) {
-        root.execute(["wpctl", "set-default", index])
+        root.execute(root.cmd("audio_set_default", {"index": index}))
         if (closeAfter) volumeSettingsPopup.forceClose()
         root.notify("Audio Management", "Output: " + outputDevices.displayText + "\nInput: " + inputDevices.displayText, "media_output")
     }
@@ -258,7 +258,7 @@ PopupWindow {
                         Layout.preferredWidth: 95
                         Layout.preferredHeight: 40
                         onClicked: prevCommand.running = true
-                        Process { id: prevCommand; command: ["playerctl", "previous"] }
+                        Process { id: prevCommand; command: root.cmd("media_previous") }
                     }
                     IconButton {
                         id: playPauseButton
@@ -272,7 +272,7 @@ PopupWindow {
                         Layout.preferredWidth: 95
                         Layout.preferredHeight: 40
                         onClicked: toggleCommand.running = true
-                        Process { id: toggleCommand; command: ["playerctl", "play-pause"] }
+                        Process { id: toggleCommand; command: root.cmd("media_toggle") }
                     }
                     IconButton {
                         iconName: "music_skip"
@@ -285,7 +285,7 @@ PopupWindow {
                         Layout.preferredWidth: 95
                         Layout.preferredHeight: 40
                         onClicked: nextCommand.running = true
-                        Process { id: nextCommand; command: ["playerctl", "next"] }
+                        Process { id: nextCommand; command: root.cmd("media_next") }
                     }
                 }
 
