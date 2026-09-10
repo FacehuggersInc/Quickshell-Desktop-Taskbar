@@ -19,7 +19,7 @@ PanelWindow {
         id: tooltipWindow
     }
     anchors {
-        top: true
+        top: true 
         left: true
         right: true
     }
@@ -29,16 +29,25 @@ PanelWindow {
     property int  gamingBarHeight: root.settings.gaming ? (root.settings.gaming.barHeight || 14) : 14
     property bool gamingBarRevealed: false
 
+    // Height of the bar window in normal mode.
+    property int barHeight: 42
+
+    // Height of the RoundedBlocks themselves. Equal to barHeight means the
+    // blocks fill the bar completely — drop this (e.g. 34) if you want slim
+    // blocks hanging from the top edge instead.
+    property int blockHeight: barHeight
+
     implicitHeight: gamingMode
         ? (gamingBarRevealed ? gamingBarHeight : 2)
-        : 60
+        : barHeight
     color: '#00ffffff'
 
     Behavior on implicitHeight {
         NumberAnimation { duration: 150; easing.type: Easing.InOutQuad }
     }
 
-    property int padding: 8
+    // Blocks sit flush against the bar window, so there is no outer padding.
+    property int padding: 0
     property int spacing: 5
 
     // ── Gaming mode: hover zone + revealed bar ──────────────────────
@@ -138,56 +147,70 @@ PanelWindow {
             color: '#00000000'
             radius: 0
         }
-        topPadding: mainWindow.padding
+        padding: 0
 
         // LEFT MODULES
         Row {
             anchors.left: parent.left
             anchors.leftMargin: mainWindow.padding
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.top: parent.top
             spacing: mainWindow.spacing
 
             RoundedBlock {
                 id: leftModules
-                anchors.verticalCenter: parent.verticalCenter
                 sidePadding: 15
                 tbPadding: 0
-                // Match implicit height to rightModules so they look the same
-                implicitHeight: rightModules.implicitHeight
+                height: mainWindow.blockHeight
+
+                angular: true
+                flushTop: true
+                flushLeft: true
 
                 WorkspaceSwitcherWidget {
                     anchors.centerIn: parent
                 }
             }
         }
-        
+
         // CENTER MODULES
         Row{
             anchors.horizontalCenter: parent.horizontalCenter
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.top: parent.top
             spacing: mainWindow.spacing
 
             AppBarWidget{
                 id: appbar
-                implicitHeight: rightModules.height 
+                height: mainWindow.blockHeight
+
+                angular: true
+                flushTop: true
             }
         }
-        
+
         // RIGHT MODULES
         Row{
             anchors.right: parent.right
             anchors.rightMargin: mainWindow.padding
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.top: parent.top
             spacing: mainWindow.spacing
 
             SystemTray {
-                implicitHeight: rightModules.height
+                height: mainWindow.blockHeight
+
+                angular: true
+                flushTop: true
             }
 
             RoundedBlock{
                 id: rightModules
-                
+                height: mainWindow.blockHeight
+
+                angular: true
+                flushTop: true
+                flushRight: true
+
                 RowLayout {
+                    anchors.centerIn: parent
                     spacing: 8
 
                     ColorPickerWidget {}
