@@ -1269,11 +1269,11 @@ RoundedBlock{
             } else if (modelData.action === "toggleGamingMasque") {
                 toggleGamingApp(modelData.className)
             } else if (modelData.action === "workspace:send") {
+                // No preselected address — the popup lists every window of the
+                // class and picks the active one by default
                 var pids = getPIDs(contextTarget.name)
-                var instances = instanceList(contextTarget.name)
                 workspaceSendPopup.targetPid = pids.length > 0 ? pids[0] : ""
-                workspaceSendPopup.targetAddress =
-                    instances.length > 0 ? instances[0].address : ""
+                workspaceSendPopup.targetAddress = ""
                 workspaceSendPopup.targetClass = contextTarget.name
                 workspaceSendPopup.open()
             } else if (modelData.action === "masque:open") {

@@ -2,7 +2,7 @@
 //@ pragma IconTheme material-symbols
 
 import QtQuick
-import Quickshell
+import Quickshell 
 import Quickshell.Io
 
 import Quickshell.Services.Notifications

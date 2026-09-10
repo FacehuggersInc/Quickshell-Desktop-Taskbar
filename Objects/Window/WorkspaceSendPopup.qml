@@ -48,6 +48,32 @@ PanelWindow {
 
     property real tileHeight: 170
 
+    // ## Which window
+    // An app can have many windows, so the caller's address is a preselection
+    // rather than the answer. Empty selection means every window of the class.
+
+    property string selectedAddress: ""
+
+    readonly property var candidates:
+        targetClass !== "" ? HyprlandSystem.windowsInClass(targetClass) : []
+
+    readonly property bool multiple: candidates.length > 1
+
+    function resetSelection() {
+        if (sendPopup.targetAddress !== "") {
+            sendPopup.selectedAddress = sendPopup.targetAddress
+            return
+        }
+        var list = sendPopup.candidates
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].activated) {
+                sendPopup.selectedAddress = list[i].address
+                return
+            }
+        }
+        sendPopup.selectedAddress = list.length > 0 ? list[0].address : ""
+    }
+
     // ## Owner contract
     // MonitorTile and WindowTile expect an owner. Nothing here drags, so the
     // drag half is inert and only the preview tick is real.
@@ -60,6 +86,7 @@ PanelWindow {
         HyprlandSystem.refresh()
         sendPopup.visible = true
         keyHandler.forceActiveFocus()
+        sendPopup.resetSelection()
         tickTimer.restart()
     }
 
@@ -85,11 +112,11 @@ PanelWindow {
             return
         }
 
-        if (sendPopup.targetAddress !== "") {
+        if (sendPopup.selectedAddress !== "") {
             HyprlandSystem.moveWindowToWorkspace(
-                sendPopup.targetAddress, mon.activeWorkspaceId, false)
-        } else if (sendPopup.targetClass !== "") {
-            var wins = HyprlandSystem.windowsInClass(sendPopup.targetClass)
+                sendPopup.selectedAddress, mon.activeWorkspaceId, false)
+        } else {
+            var wins = sendPopup.candidates
             for (var i = 0; i < wins.length; i++) {
                 HyprlandSystem.moveWindowToWorkspace(
                     wins[i].address, mon.activeWorkspaceId, false)
@@ -99,8 +126,13 @@ PanelWindow {
     }
 
     function stashTo(bucket) {
-        if (sendPopup.targetAddress !== "")
-            HyprlandSystem.stashWindow(sendPopup.targetAddress, bucket)
+        if (sendPopup.selectedAddress !== "") {
+            HyprlandSystem.stashWindow(sendPopup.selectedAddress, bucket)
+        } else {
+            var wins = sendPopup.candidates
+            for (var i = 0; i < wins.length; i++)
+                HyprlandSystem.stashWindow(wins[i].address, bucket)
+        }
         close()
     }
 
@@ -152,12 +184,135 @@ PanelWindow {
             Text {
                 Layout.alignment: Qt.AlignHCenter
                 text: sendPopup.targetClass !== ""
-                    ? "Send " + sendPopup.targetClass + " to"
-                    : "Send window to"
+                    ? sendPopup.targetClass
+                    : "Send window"
                 color: Theme.text
                 font.family: Theme.fontFamily
                 font.pixelSize: 15
                 font.weight: 700
+            }
+
+            // ## Window picker
+            // Only shown when the app actually has more than one window
+
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                visible: sendPopup.multiple
+                text: "which window"
+                color: Theme.textMute
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.descSize
+            }
+
+            Flow {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.maximumWidth: sendPopup.width - 160
+                spacing: 10
+                visible: sendPopup.multiple
+
+                Repeater {
+                    model: sendPopup.candidates
+
+                    delegate: Rectangle {
+                        required property var modelData
+
+                        readonly property bool picked:
+                            sendPopup.selectedAddress === modelData.address
+
+                        width: 150
+                        height: 96
+                        radius: Theme.radiusSmall
+                        color: picked ? Theme.alpha(Theme.accent, 0.20)
+                                      : Theme.alpha(Theme.scrimBase, 0.45)
+                        border.width: picked ? 2 : Theme.borderWidth
+                        border.color: picked ? Theme.accent
+                                             : Theme.alpha(Theme.textBase, 0.12)
+
+                        Behavior on color { ColorAnimation { duration: Theme.durFast } }
+
+                        WindowTile {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 5
+                            height: 58
+                            win: modelData
+                            owner: sendPopup
+                            interactive: false
+                        }
+
+                        Text {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 6
+                            text: modelData.title !== "" ? modelData.title : modelData.appClass
+                            elide: Text.ElideRight
+                            horizontalAlignment: Text.AlignHCenter
+                            color: picked ? Theme.accentText : Theme.textDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.descSize
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: sendPopup.selectedAddress = modelData.address
+                        }
+                    }
+                }
+
+                Rectangle {
+                    readonly property bool picked: sendPopup.selectedAddress === ""
+
+                    width: 96
+                    height: 96
+                    radius: Theme.radiusSmall
+                    color: picked ? Theme.alpha(Theme.accent, 0.20)
+                                  : Theme.alpha(Theme.scrimBase, 0.45)
+                    border.width: picked ? 2 : Theme.borderWidth
+                    border.color: picked ? Theme.accent
+                                         : Theme.alpha(Theme.textBase, 0.12)
+
+                    Behavior on color { ColorAnimation { duration: Theme.durFast } }
+
+                    Column {
+                        anchors.centerIn: parent
+                        spacing: 2
+
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: sendPopup.candidates.length
+                            color: parent.parent.picked ? Theme.accentText : Theme.text
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 20
+                            font.weight: 700
+                        }
+
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "All windows"
+                            color: Theme.textMute
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.descSize
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: sendPopup.selectedAddress = ""
+                    }
+                }
+            }
+
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: sendPopup.multiple ? 8 : 0
+                text: "send to"
+                color: Theme.textMute
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.descSize
             }
 
             Flow {
@@ -184,7 +339,6 @@ PanelWindow {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.topMargin: 8
                 visible: sendPopup.bucketNames.length > 0
-                    && sendPopup.targetAddress !== ""
                 text: "or stash it"
                 color: Theme.textMute
                 font.family: Theme.fontFamily
@@ -196,7 +350,6 @@ PanelWindow {
                 Layout.maximumWidth: sendPopup.width - 160
                 spacing: 8
                 visible: sendPopup.bucketNames.length > 0
-                    && sendPopup.targetAddress !== ""
 
                 Repeater {
                     model: sendPopup.bucketNames

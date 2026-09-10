@@ -15,9 +15,10 @@ Item {
 
     // Lit dots sit on a dark offset twin. Without it the display disappears
     // into a pale wallpaper, since the lit colour is itself light in dark mode.
-    // A halo rather than an offset. An offset twin only darkens one side, so a
-    // lit dot still washed out against a pale backdrop on its other three.
-    property bool shadow: true
+    // Off by default. A per-dot halo is nearly as wide as the dot itself, so
+    // neighbouring halos merge and the glyph reads as a smudge rather than a
+    // grid. Kept as an option for very pale wallpapers.
+    property bool shadow: false
     property color shadowColor: Qt.rgba(0, 0, 0, 0.62)
     property real shadowSpread: 2
 

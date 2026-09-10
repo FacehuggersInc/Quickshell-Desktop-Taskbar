@@ -355,6 +355,14 @@ The popup implements the minimal owner contract those tiles expect —
 `previewTick`, `dragAddress`, `dropTarget`. Nothing here drags, so the drag half
 is inert.
 
-Buckets appear underneath when a specific window is targeted, so stashing is one
-click from the same place. They are hidden when the target is a whole class,
-since stashing every window of an app is rarely what the context menu meant.
+An application can have several windows, so the popup lists every window of the
+class as a selectable preview and defaults to the active one. An "All windows"
+tile sends the whole set at once. The row is hidden when there is only one
+window, so the common case stays a single click.
+
+The context menu no longer preselects an address. It used to pass
+`instances[0].address`, which silently picked whichever window happened to be
+first with no way to choose another.
+
+Buckets appear underneath, so stashing is one click from the same place and
+follows the same selection.

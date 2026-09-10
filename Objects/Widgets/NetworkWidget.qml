@@ -189,15 +189,6 @@ Item {
                     height: 2
 
                     Rectangle {
-                        visible: meterCell.lit
-                        anchors.centerIn: parent
-                        width: 3.5
-                        height: 3.5
-                        radius: width / 2
-                        color: Qt.rgba(0, 0, 0, 0.62)
-                    }
-
-                    Rectangle {
                         anchors.fill: parent
                         radius: 1
                         color: meterCell.lit
