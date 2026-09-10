@@ -17,7 +17,7 @@ Window {
     height: mode === "existing" ? 500 : 680
     minimumWidth: 500
     minimumHeight: 300
-    color: root.settings.theme.background
+    color: root.theme.background
 
     flags: Qt.Window | Qt.WindowTitleHint | Qt.WindowCloseButtonHint
 
@@ -60,7 +60,7 @@ Window {
 
         Text {
             text: mode === "existing" ? "Choose an Application" : "Custom App"
-            color: root.settings.theme.text
+            color: root.theme.text
             font.family: root.settings.fontFamily
             font.weight: 700
             font.pixelSize: 20

@@ -44,7 +44,7 @@ Item {
                 spacing: 4
                 Text {
                     text: "Nickname"
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     opacity: 0.6
                     font.family: root.settings.fontFamily
                     font.pixelSize: 12
@@ -53,13 +53,13 @@ Item {
                     Layout.fillWidth: true
                     height: 36
                     radius: 6
-                    color: root.settings.theme.surface
+                    color: root.theme.surface
                     TextField {
                         id: nameField
                         anchors.fill: parent
                         anchors.margins: 8
                         placeholderText: "e.g. VS Code"
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font.family: root.settings.fontFamily
                         font.pixelSize: 14
                         background: Item {}
@@ -73,7 +73,7 @@ Item {
                 spacing: 4
                 Text {
                     text: "Class Name  (used for window matching & icon lookup)"
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     opacity: 0.6
                     font.family: root.settings.fontFamily
                     font.pixelSize: 12
@@ -82,13 +82,13 @@ Item {
                     Layout.fillWidth: true
                     height: 36
                     radius: 6
-                    color: root.settings.theme.surface
+                    color: root.theme.surface
                     TextField {
                         id: classNameField
                         anchors.fill: parent
                         anchors.margins: 8
                         placeholderText: "e.g. code  or  org.gnome.Nautilus"
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font.family: root.settings.fontFamily
                         font.pixelSize: 14
                         background: Item {}
@@ -102,7 +102,7 @@ Item {
                 spacing: 4
                 Text {
                     text: "Launch Command"
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     opacity: 0.6
                     font.family: root.settings.fontFamily
                     font.pixelSize: 12
@@ -111,13 +111,13 @@ Item {
                     Layout.fillWidth: true
                     height: 36
                     radius: 6
-                    color: root.settings.theme.surface
+                    color: root.theme.surface
                     TextField {
                         id: commandField
                         anchors.fill: parent
                         anchors.margins: 8
                         placeholderText: "e.g. code  or  /usr/bin/code"
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font.family: root.settings.fontFamily
                         font.pixelSize: 14
                         background: Item {}
@@ -131,7 +131,7 @@ Item {
                 spacing: 4
                 Text {
                     text: "Icon Path  (optional — leave blank to auto-detect from class name)"
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     opacity: 0.6
                     font.family: root.settings.fontFamily
                     font.pixelSize: 12
@@ -140,13 +140,13 @@ Item {
                     Layout.fillWidth: true
                     height: 36
                     radius: 6
-                    color: root.settings.theme.surface
+                    color: root.theme.surface
                     TextField {
                         id: iconField
                         anchors.fill: parent
                         anchors.margins: 8
                         placeholderText: "e.g. /usr/share/icons/... or leave blank"
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font.family: root.settings.fontFamily
                         font.pixelSize: 14
                         background: Item {}
@@ -163,7 +163,7 @@ Item {
                     Layout.fillWidth: true
                     Text {
                         text: "Option Sets"
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font.family: root.settings.fontFamily
                         font.weight: 600
                         font.pixelSize: 14
@@ -171,7 +171,7 @@ Item {
                     }
                     Text {
                         text: "The Custom Sets of args that will allow quick launching of the Launch Command + Args in the context menu of a pinned app. \nEach set is a string split by spaces, this becomes the Args to launch with"
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         opacity: 0.45
                         font.family: root.settings.fontFamily
                         font.pixelSize: 11
@@ -185,12 +185,12 @@ Item {
                         contentItem: Text {
                             text: parent.text
                             font: parent.font
-                            color: root.settings.theme.text
+                            color: root.theme.text
                             horizontalAlignment: Text.AlignHCenter
                         }
                         background: Rectangle {
                             radius: 6
-                            color: root.settings.theme.primary
+                            color: root.theme.primary
                             opacity: 0.5
                         }
                         HoverHandler { cursorShape: Qt.PointingHandCursor }
@@ -209,14 +209,14 @@ Item {
                             Layout.fillWidth: true
                             height: 34
                             radius: 6
-                            color: root.settings.theme.surface
+                            color: root.theme.surface
 
                             TextField {
                                 anchors.fill: parent
                                 anchors.margins: 6
                                 text: model.value
                                 placeholderText: "e.g. --new-window /home/{user}/project"
-                                color: root.settings.theme.text
+                                color: root.theme.text
                                 font.family: root.settings.fontFamily
                                 font.pixelSize: 13
                                 background: Item {}
@@ -238,7 +238,7 @@ Item {
                 Text {
                     visible: optionsModel.count === 0
                     text: "No option sets — app will always launch with no args"
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     opacity: 0.35
                     font.family: root.settings.fontFamily
                     font.pixelSize: 12
@@ -253,7 +253,7 @@ Item {
 
                 Text {
                     text: "Masque Under  (optional — class name of pinned app to merge into)"
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     opacity: 0.6
                     font.family: root.settings.fontFamily
                     font.pixelSize: 12
@@ -267,13 +267,13 @@ Item {
                         Layout.fillWidth: true
                         height: 36
                         radius: 6
-                        color: root.settings.theme.surface
+                        color: root.theme.surface
                         TextField {
                             id: masqueField
                             anchors.fill: parent
                             anchors.margins: 6
                             placeholderText: "e.g. code  — leave blank for none"
-                            color: root.settings.theme.text
+                            color: root.theme.text
                             font.family: root.settings.fontFamily
                             font.pixelSize: 13
                             background: Item {}
@@ -291,12 +291,12 @@ Item {
                         contentItem: Text {
                             text: parent.text
                             font: parent.font
-                            color: root.settings.theme.text
+                            color: root.theme.text
                             horizontalAlignment: Text.AlignHCenter
                         }
                         background: Rectangle {
                             radius: 6
-                            color: root.settings.theme.surface
+                            color: root.theme.surface
                         }
                         HoverHandler { cursorShape: Qt.PointingHandCursor }
                         onClicked: masquePickerList.visible = !masquePickerList.visible
@@ -334,7 +334,7 @@ Item {
                                         : modelData.name
                                     font.family: root.settings.fontFamily
                                     font.pixelSize: 13
-                                    color: root.settings.theme.text
+                                    color: root.theme.text
                                     elide: Text.ElideRight
                                     Layout.fillWidth: true
                                 }
@@ -342,8 +342,8 @@ Item {
                             background: Rectangle {
                                 radius: 6
                                 color: pickHov.hovered
-                                    ? root.settings.theme.primary
-                                    : root.settings.theme.surface
+                                    ? root.theme.primary
+                                    : root.theme.surface
                                 opacity: pickHov.hovered ? 0.4 : 0.6
                             }
                             HoverHandler { id: pickHov; cursorShape: Qt.PointingHandCursor }
@@ -363,7 +363,7 @@ Item {
 
                 Text {
                     text: "Option Flags"
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     font.family: root.settings.fontFamily
                     font.weight: 600
                     font.pixelSize: 14
@@ -376,7 +376,7 @@ Item {
                     font.pixelSize: 13
                     contentItem: Text {
                         text: lockOptionsCheck.text
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font: lockOptionsCheck.font
                         leftPadding: lockOptionsCheck.indicator.width + 6
                         verticalAlignment: Text.AlignVCenter
@@ -390,7 +390,7 @@ Item {
                     font.pixelSize: 13
                     contentItem: Text {
                         text: ignoreOptionsCheck.text
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font: ignoreOptionsCheck.font
                         leftPadding: ignoreOptionsCheck.indicator.width + 6
                         verticalAlignment: Text.AlignVCenter
@@ -420,12 +420,12 @@ Item {
                 contentItem: Text {
                     text: parent.text
                     font: parent.font
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     horizontalAlignment: Text.AlignHCenter
                 }
                 background: Rectangle {
                     radius: 8
-                    color: root.settings.theme.primary
+                    color: root.theme.primary
                     opacity: 0.8
                 }
                 HoverHandler { cursorShape: Qt.PointingHandCursor }

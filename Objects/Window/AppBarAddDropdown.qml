@@ -38,13 +38,13 @@ PopupPanel {
             Text {
                 text: parent.parent.text
                 font: parent.parent.font
-                color: root.settings.theme.text
+                color: root.theme.text
                 Layout.fillWidth: true
             }
         }
         background: Rectangle {
             radius: 6
-            color: dbHov.hovered ? root.settings.theme.primary : "transparent"
+            color: dbHov.hovered ? root.theme.primary : "transparent"
             opacity: dbHov.hovered ? 0.18 : 1
         }
         HoverHandler { id: dbHov; cursorShape: Qt.PointingHandCursor }

@@ -1,32 +1,48 @@
-
 import QtQuick
-import Quickshell
-import QtQuick.Controls
-import Quickshell.Widgets
-import QtQuick.Controls.Material
+import QtQuick.Effects
 
-IconImage {
-    id: sIO
+Item {
+    id: icon
+
     required property string iconName
-    required property real iconSize
-    property string color: "#ffffff";
+    property real iconSize: 18
+    property color color: "#ffffff"
 
-    Material.foreground: color
+    // Tint has to be done here. Material.foreground only colours icons on
+    // Material controls, so it silently did nothing on a bare image.
+    property bool tinted: true
 
-    implicitHeight: iconSize
     implicitWidth: iconSize
-    source: root.iconSource(iconName)
+    implicitHeight: iconSize
+    width: iconSize
+    height: iconSize
 
-    function setIcon(name){
-        sIO.iconName = name
-        var source = root.iconSource(name)
-        sIO.source = source
-        return source
+    Image {
+        id: source
+        anchors.fill: parent
+        source: icon.iconName ? root.iconSource(icon.iconName) : ""
+        sourceSize.width: Math.round(icon.iconSize * 2)
+        sourceSize.height: Math.round(icon.iconSize * 2)
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        cache: true
+        visible: !icon.tinted
     }
 
-    function setColor(color){
-        sIO.color = color
-        Material.foreground = color
+    MultiEffect {
+        anchors.fill: parent
+        source: source
+        visible: icon.tinted && source.status === Image.Ready
+        colorization: 1.0
+        colorizationColor: icon.color
     }
 
+    function setIcon(name) {
+        icon.iconName = name
+        return root.iconSource(name)
+    }
+
+    function setColor(value) {
+        icon.color = value
+    }
 }

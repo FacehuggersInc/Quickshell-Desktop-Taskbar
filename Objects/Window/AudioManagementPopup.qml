@@ -1,6 +1,10 @@
 import Quickshell
+import Quickshell.Wayland
+
+import qs.Objects.Theme
 import Quickshell.Io
 import QtQuick
+import QtQuick.Effects
 import Quickshell.Widgets
 import QtQuick.Layouts
 import QtQuick.Controls
@@ -9,6 +13,8 @@ import Quickshell.Hyprland
 import Qt5Compat.GraphicalEffects
 
 import qs.Objects.Design
+import qs.Objects.Design.Controls
+import qs.Objects.Theme
 import qs.Objects.Window
 import qs.Objects.Widgets
 import qs.Objects.Widgets.Internal
@@ -29,6 +35,10 @@ PopupWindow {
     visible: false
 
     mask: Region { item: background }
+
+    property Region glassBlurRegion: Region { item: background }
+    BackgroundEffect.blurRegion:
+        (Theme.glass && Theme.blurMode === "protocol") ? glassBlurRegion : null
 
     // Click outside to close
     MouseArea {
@@ -93,8 +103,7 @@ PopupWindow {
                         getDevicesProc.inputs.push(device)
                     }
                 }
-                fillDeviceComboBox(outputDevices, getDevicesProc.outputs)
-                fillDeviceComboBox(inputDevices, getDevicesProc.inputs)
+                volumeSettingsPopup.buildDevices()
             }
         }
     }
@@ -106,26 +115,50 @@ PopupWindow {
     function setDevice(index, closeAfter) {
         root.execute(root.cmd("audio_set_default", {"index": index}))
         if (closeAfter) volumeSettingsPopup.forceClose()
-        root.notify("Audio Management", "Output: " + outputDevices.displayText + "\nInput: " + inputDevices.displayText, "media_output")
+        root.notify("Audio Management",
+                    "Output: " + volumeSettingsPopup.outputLabel
+                    + "\nInput: " + volumeSettingsPopup.inputLabel,
+                    "media_output")
     }
 
-    function fillDeviceComboBox(combo, items) {
-        combo.items.clear()
-        var defaultIndex = 0
+    // ## Devices
+    // Plain arrays feeding SelectBox, so the audio devices use the same control
+    // as everything else instead of a bespoke combo box
+
+    property var outputOptions: []
+    property var inputOptions: []
+    property int outputCurrent: -1
+    property int inputCurrent: -1
+    property string outputLabel: ""
+    property string inputLabel: ""
+
+    function parseDevices(items) {
+        var options = []
+        var current = -1
+        var label = ""
         for (var i = 0; i < items.length; i++) {
             var parts = items[i].split(",")
+            if (parts.length < 4) continue
+            var id = parseInt(parts[0])
+            options.push({ label: parts[3], value: id })
             if (parts[2].includes("True")) {
-                defaultIndex = i
-                combo.selectedId = parseInt(parts[0])
+                current = id
+                label = parts[3]
             }
-            combo.items.append({
-                "id": parseInt(parts[0]),
-                "name": parts[3],
-                "index": i
-            })
         }
-        combo.currentIndex = defaultIndex
-        combo.popup.height = items.length * 45
+        return { options: options, current: current, label: label }
+    }
+
+    function buildDevices() {
+        var out = parseDevices(getDevicesProc.outputs)
+        volumeSettingsPopup.outputOptions = out.options
+        volumeSettingsPopup.outputCurrent = out.current
+        volumeSettingsPopup.outputLabel = out.label
+
+        var inp = parseDevices(getDevicesProc.inputs)
+        volumeSettingsPopup.inputOptions = inp.options
+        volumeSettingsPopup.inputCurrent = inp.current
+        volumeSettingsPopup.inputLabel = inp.label
     }
 
     function updateCurrentlyPlaying() {
@@ -159,21 +192,21 @@ PopupWindow {
 
         if (volOn) {
             var style = getStyleFromPercentage(volPct)
-            volumeSliderIcon.setColor(root.settings.theme.primary)
+            volumeSliderIcon.setColor(Theme.accentIcon)
             volumeSliderIcon.setIcon(style[1])
             volumeSliderText.text = style[2] + "%"
         } else {
-            volumeSliderIcon.setColor('#848484')
+            volumeSliderIcon.setColor(Theme.textMute)
             volumeSliderIcon.setIcon("volume_mute")
             volumeSliderText.text = "Mute"
         }
 
         if (micOn) {
             micSliderIcon.setIcon("microphone")
-            micSliderIcon.setColor('#ff4a4a')
+            micSliderIcon.setColor(Theme.ok)
             micSliderText.text = micPct + "%"
         } else {
-            micSliderIcon.setColor(root.settings.theme.primary)
+            micSliderIcon.setColor(Theme.textMute)
             micSliderIcon.setIcon("microphone_mute")
             micSliderText.text = "Mute"
         }
@@ -190,7 +223,9 @@ PopupWindow {
         width: panelWidth
         height: panelHeight
         radius: 15
-        color: root.settings.theme.background
+        color: root.theme.background
+        border.width: Theme.borderWidth
+        border.color: Theme.border
         opacity: 0
         clip: true
 
@@ -201,14 +236,13 @@ PopupWindow {
         }
 
         layer.enabled: true
-        layer.effect: DropShadow {
-            transparentBorder: true
-            horizontalOffset: 1
-            verticalOffset: 1
-            radius: 25
-            samples: 100
-            color: "#80000000"
-            source: background
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowColor: Theme.shadow
+            shadowBlur: 0.7
+            shadowVerticalOffset: 2
+            shadowHorizontalOffset: 0
+            blurMax: 24
         }
 
         // ── Scrollable content ────────────────────────────────────
@@ -224,13 +258,12 @@ PopupWindow {
             ColumnLayout {
                 id: audioColumn
                 width: panelWidth - 24
-                spacing: 10
+                spacing: Theme.gap
 
                 // ── MEDIA ─────────────────────────────────────────
-                TextDivider {
+                SectionLabel {
                     id: mediaHeader
-                    dividerText: "Media"
-                    dividerHeight: 3
+                    text: "Media"
                     Layout.fillWidth: true
                 }
 
@@ -238,22 +271,22 @@ PopupWindow {
                     id: currentlyPlaying
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignCenter
-                    textColor: root.settings.theme.text
+                    textColor: root.theme.text
                     textWordWrap: true
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignCenter
-                    spacing: 6
+                    spacing: Theme.gap
 
                     IconButton {
                         iconName: "music_prev"
                         iconSize: 50
                         tooltipText: "Previous"
-                        color: root.settings.theme.primary
+                        color: root.theme.primary
                         radius: 8
-                        borderColor: root.settings.theme.primary
+                        borderColor: root.theme.primary
                         borderWidth: 2
                         Layout.preferredWidth: 95
                         Layout.preferredHeight: 40
@@ -265,9 +298,9 @@ PopupWindow {
                         iconName: "music_pause"
                         iconSize: 50
                         tooltipText: "Play/Pause"
-                        color: root.settings.theme.primary
+                        color: root.theme.primary
                         radius: 8
-                        borderColor: root.settings.theme.primary
+                        borderColor: root.theme.primary
                         borderWidth: 2
                         Layout.preferredWidth: 95
                         Layout.preferredHeight: 40
@@ -278,9 +311,9 @@ PopupWindow {
                         iconName: "music_skip"
                         iconSize: 50
                         tooltipText: "Skip"
-                        color: root.settings.theme.primary
+                        color: root.theme.primary
                         radius: 8
-                        borderColor: root.settings.theme.primary
+                        borderColor: root.theme.primary
                         borderWidth: 2
                         Layout.preferredWidth: 95
                         Layout.preferredHeight: 40
@@ -290,15 +323,14 @@ PopupWindow {
                 }
 
                 // ── VOLUME CONTROL ────────────────────────────────
-                TextDivider {
-                    dividerText: "Volume Control"
-                    dividerHeight: 3
+                SectionLabel {
+                    text: "Volume Control"
                     Layout.fillWidth: true
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 6
+                    spacing: Theme.gap
                     IconButton {
                         id: volumeSliderIcon
                         iconName: "volume_min"
@@ -316,7 +348,7 @@ PopupWindow {
                     Text {
                         id: volumeSliderText
                         text: "0%"
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font.family: root.settings.fontFamily
                         font.weight: 500
                         font.pixelSize: 16
@@ -325,7 +357,7 @@ PopupWindow {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 6
+                    spacing: Theme.gap
                     IconButton {
                         id: micSliderIcon
                         iconName: "microphone_alert"
@@ -344,7 +376,7 @@ PopupWindow {
                     Text {
                         id: micSliderText
                         text: "0%"
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font.family: root.settings.fontFamily
                         font.weight: 500
                         font.pixelSize: 16
@@ -352,39 +384,36 @@ PopupWindow {
                 }
 
                 // ── AUDIO DEVICES ─────────────────────────────────
-                TextDivider {
-                    dividerText: "Audio Devices"
-                    dividerHeight: 3
+                SectionLabel {
                     Layout.fillWidth: true
+                    text: "Audio Devices"
                 }
 
-                RowLayout {
+                SettingRow {
                     Layout.fillWidth: true
-                    spacing: 10
-                    IconButton {
-                        iconName: "media_output"
-                        iconSize: 45
-                        tooltipText: "Output Device"
-                        color: root.settings.theme.primary
-                    }
-                    DeviceComboBox {
-                        id: outputDevices
-                        Layout.fillWidth: true
+                    iconName: "media_output"
+                    label: "Output"
+                    description: volumeSettingsPopup.outputLabel
+
+                    SelectBox {
+                        width: 260
+                        options: volumeSettingsPopup.outputOptions
+                        value: volumeSettingsPopup.outputCurrent
+                        onPicked: (v) => volumeSettingsPopup.setDevice(v, false)
                     }
                 }
 
-                RowLayout {
+                SettingRow {
                     Layout.fillWidth: true
-                    spacing: 10
-                    IconButton {
-                        iconName: "media_input"
-                        iconSize: 45
-                        tooltipText: "Input Device"
-                        color: root.settings.theme.primary
-                    }
-                    DeviceComboBox {
-                        id: inputDevices
-                        Layout.fillWidth: true
+                    iconName: "media_input"
+                    label: "Input"
+                    description: volumeSettingsPopup.inputLabel
+
+                    SelectBox {
+                        width: 260
+                        options: volumeSettingsPopup.inputOptions
+                        value: volumeSettingsPopup.inputCurrent
+                        onPicked: (v) => volumeSettingsPopup.setDevice(v, false)
                     }
                 }
 

@@ -13,7 +13,7 @@ IconButton {
     iconName: "bluetooth"
     iconSize: 25
     tooltipText: "Bluetooth"
-    color: root.settings.theme.secondary
+    color: root.theme.secondary
 
     property bool powered: false
     property int connectedCount: 0
@@ -43,7 +43,7 @@ IconButton {
                 })
                 bluetoothWidget.powered = obj["powered"] === "yes"
                 bluetoothWidget.setIcon(bluetoothWidget.powered ? "bluetooth" : "bluetooth_disabled")
-                bluetoothWidget.setColor(bluetoothWidget.powered ? root.settings.theme.primary : root.settings.theme.secondary)
+                bluetoothWidget.setColor(bluetoothWidget.powered ? root.theme.primary : root.theme.secondary)
                 bluetoothWidget.tooltipText = bluetoothWidget.powered
                     ? "Bluetooth: On"
                     : "Bluetooth: Off"

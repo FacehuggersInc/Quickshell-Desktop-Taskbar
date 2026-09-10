@@ -45,7 +45,7 @@ PopupPanel {
         Text {
             id: launchName
             Layout.fillWidth: true
-            color: root.settings.theme.text
+            color: root.theme.text
             font.family: root.settings.fontFamily
             font.weight: 500
             font.pixelSize: 20

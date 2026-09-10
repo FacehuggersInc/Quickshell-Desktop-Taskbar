@@ -44,16 +44,16 @@ PopupPanel {
             id: runField
             Layout.fillWidth: true
             placeholderText: "Run command..."
-            color: root.settings.theme.text
+            color: root.theme.text
             cursorDelegate: Rectangle {
                 width: 2
-                color: root.settings.theme.primary
+                color: root.theme.primary
             }
             font.family: root.settings.fontFamily
             font.weight: 500
             font.pixelSize: 15
             background: Rectangle {
-                color: root.settings.theme.surface
+                color: root.theme.surface
                 border.width: 0
                 radius: 15
             }
@@ -64,7 +64,7 @@ PopupPanel {
             iconName: "close"
             iconSize: 35
             tooltipText: "Close"
-            color: root.settings.theme.text
+            color: root.theme.text
             onClicked: runPopup.acceptAndRun(false)
         }
     }

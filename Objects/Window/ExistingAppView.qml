@@ -83,7 +83,7 @@ Item {
             Layout.fillWidth: true
             height: 38
             radius: 8
-            color: root.settings.theme.surface
+            color: root.theme.surface
 
             RowLayout {
                 anchors.fill: parent
@@ -101,7 +101,7 @@ Item {
                     id: searchField
                     Layout.fillWidth: true
                     placeholderText: "Search applications..."
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     font.family: root.settings.fontFamily
                     font.pixelSize: 14
                     background: Item {}
@@ -114,7 +114,7 @@ Item {
         Text {
             visible: existingView.loading
             text: "Loading applications..."
-            color: root.settings.theme.text
+            color: root.theme.text
             opacity: 0.5
             font.family: root.settings.fontFamily
             font.pixelSize: 14
@@ -146,7 +146,7 @@ Item {
                         background: Rectangle {
                             radius: 6
                             color: hov.hovered
-                                ? root.settings.theme.primary
+                                ? root.theme.primary
                                 : "transparent"
                             opacity: hov.hovered ? 0.15 : 1
                         }
@@ -176,7 +176,7 @@ Item {
                                 spacing: 2
                                 Text {
                                     text: modelData.name
-                                    color: root.settings.theme.text
+                                    color: root.theme.text
                                     font.family: root.settings.fontFamily
                                     font.weight: 600
                                     font.pixelSize: 14
@@ -187,7 +187,7 @@ Item {
                                     text: modelData.comment !== ""
                                         ? modelData.comment
                                         : modelData.exec
-                                    color: root.settings.theme.text
+                                    color: root.theme.text
                                     opacity: 0.45
                                     font.family: root.settings.fontFamily
                                     font.pixelSize: 11
@@ -206,12 +206,12 @@ Item {
                                 contentItem: Text {
                                     text: parent.text
                                     font: parent.font
-                                    color: root.settings.theme.text
+                                    color: root.theme.text
                                     horizontalAlignment: Text.AlignHCenter
                                 }
                                 background: Rectangle {
                                     radius: 6
-                                    color: root.settings.theme.primary
+                                    color: root.theme.primary
                                     opacity: 0.7
                                 }
                                 HoverHandler { cursorShape: Qt.PointingHandCursor }

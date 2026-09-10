@@ -10,6 +10,7 @@ import QtQuick.Controls.Material
 import qs.Objects.Window
 import qs.Objects.Design
 import qs.Objects.Widgets
+import qs.Objects.Systems
 
 RoundedBlock{
     id: appBarWidget
@@ -22,6 +23,14 @@ RoundedBlock{
     property var appStore: ({})
 
     property var queuedAppClassesForIcons: ([])
+
+    // ## Window data
+    // Windows come from the Hyprland event socket. Two things it does not
+    // expose are cached here instead of being refetched every tick: the icon
+    // path for a class, and the command line for a pid.
+
+    property var iconCache: ({})
+    property var commandCache: ({})
 
     // Drag reorder state (must live here — delegates reference appBarWidget.dragSourceIndex/Target)
     property int dragSourceIndex: -1
@@ -476,6 +485,65 @@ RoundedBlock{
         }
     }
 
+    // ## Sync
+    // getActiveApps still consumes the pipe-delimited string the Python helper
+    // used to produce, so only the producer changed. Commands are fetched first
+    // when a window is new, otherwise an app would be added to the bar with an
+    // empty launch command and never pick one up.
+
+    function syncFromHyprland(){
+        var wins = HyprlandSystem.windows
+        var missing = []
+
+        for (var i = 0; i < wins.length; i++){
+            var pid = String(wins[i].pid)
+            if (!pid || pid === "0") continue
+            if (commandCache[pid] !== undefined) continue
+            if (missing.indexOf(pid) === -1) missing.push(pid)
+        }
+
+        if (missing.length > 0 && !getCommandsProc.running){
+            getCommandsProc.command = root.newUtill(root.combine(["--getcommands"], missing))
+            getCommandsProc.running = true
+            return
+        }
+
+        rebuildActive()
+    }
+
+    function rebuildActive(){
+        var wins = HyprlandSystem.windows
+        var rows = []
+        var queued = false
+
+        for (var i = 0; i < wins.length; i++){
+            var w = wins[i]
+            if (!w.appClass) continue
+
+            var pid = String(w.pid)
+            var icon = iconCache[w.appClass]
+            if (!icon){
+                icon = "*"
+                if (queuedAppClassesForIcons.indexOf(w.appClass) === -1){
+                    queuedAppClassesForIcons.push(w.appClass)
+                    queued = true
+                }
+            }
+
+            // Commas are the field separator, and window titles routinely
+            // contain them
+            var title = (w.title || "").replace(/,/g, " ")
+            var command = (commandCache[pid] || "").replace(/,/g, " ")
+
+            rows.push([pid, w.appClass, icon, command,
+                       w.workspaceName, title, w.address].join(","))
+        }
+
+        if (queued) getAppIconsProc.getIcons(false)
+
+        updateApps(rows.join("|"))
+    }
+
     function updateApps(newDataStr){
         clearInactiveApps()
         getActiveApps(newDataStr)
@@ -878,11 +946,9 @@ RoundedBlock{
     function closeApp(index, name){
         var state = appStore[name]
         var instance = state.procs[index]
-        // Close by hyprland window address — exact, no fuzzy matching needed
         if (instance.address) {
-            root.execute(root.cmd("hypr_close_window", {"address": instance.address}))
+            HyprlandSystem.closeWindow(instance.address)
         } else {
-            // Fallback for windows without address data
             var title = instance.windowTitle
             root.execute( root.newUtill( root.combine( ["--closehyprwindow"], title.split(" ") ) ) )
         }
@@ -892,34 +958,50 @@ RoundedBlock{
         }
     }
 
+    // ## Window visibility
+    // Targeted by address. A pid cannot pick between two windows of the same
+    // application, which is why hiding and restoring used to act on the wrong
+    // window for browsers and anything else that opens more than one.
+
+    function instanceList(name){
+        var state = appStore[name]
+        return state ? state.procs : []
+    }
+
+    function hideInstance(instance){
+        if (!instance || !instance.address) return
+        instance["lastWorkspace"] = (instance.workspace || "").trim()
+        HyprlandSystem.moveWindowToWorkspace(instance.address, "special:hidden", false)
+    }
+
+    function showInstance(instance){
+        if (!instance || !instance.address) return
+        var target = instance.lastWorkspace ? instance.lastWorkspace.trim() : "1"
+        if (target === "special:hidden") target = "1"
+        HyprlandSystem.moveWindowToWorkspace(instance.address, target, false)
+    }
+
     function hideInWorkspace(pid){
-        var pidAppState = getAppStateFromPID(pid)
-        if (pidAppState){
-            pidAppState['lastWorkspace'] = pidAppState['workspace'].trim()
-        }
-        root.execute(root.cmd("hypr_hide_window", {"pid": pid}))
+        var instance = getAppStateFromPID(pid)
+        hideInstance(instance)
     }
 
     function showInDefault(pid){
-        var pidAppState = getAppStateFromPID(pid)
-        if (pidAppState.lastWorkspace){
-            root.execute(root.cmd("hypr_move_window", {"workspace": pidAppState['lastWorkspace'].trim(), "pid": pid}))
-        } else {
-            root.execute(root.cmd("hypr_move_window", {"workspace": "1", "pid": pid}))
-        }
+        var instance = getAppStateFromPID(pid)
+        showInstance(instance)
     }
 
     function hideAll(data){
-        var pids = getPIDs(data.name)
-        for (var i=0; i < pids.length; i++){
-            hideInWorkspace( pids[i] )
+        var list = instanceList(data.name)
+        for (var i = 0; i < list.length; i++){
+            hideInstance(list[i])
         }
     }
 
     function showAll(data){
-        var pids = getPIDs(data.name)
-        for (var i=0; i < pids.length; i++){
-            showInDefault( pids[i] )
+        var list = instanceList(data.name)
+        for (var i = 0; i < list.length; i++){
+            showInstance(list[i])
         }
     }
 
@@ -1010,20 +1092,12 @@ RoundedBlock{
     }
 
     // OBJECTS
-    Timer{
-        id: getAppsTimer
-        interval: 10
-        running: true
-        repeat: true
-        onTriggered: {
-            if (!addedStaticApps){ 
-                getAppsTimer.interval = 650
-            }
-            if (!getActiveAppsProc.running){
-                getActiveAppsProc.running = true
-            }
-        }
+    Connections {
+        target: HyprlandSystem
+        function onChanged() { appBarWidget.syncFromHyprland() }
     }
+
+    Component.onCompleted: syncFromHyprland()
 
     Process{
         id: getAppIconsProc
@@ -1054,6 +1128,7 @@ RoundedBlock{
                     var cls  = entries[e].substring(0, colonIdx).trim()
                     var path = entries[e].substring(colonIdx + 1).trim()
                     iconMap[cls] = path
+                    appBarWidget.iconCache[cls] = path
                 }
 
                 // Update settings.launchers
@@ -1092,12 +1167,23 @@ RoundedBlock{
     }
 
     Process{
-        id: getActiveAppsProc
-        command: root.newUtill(["--getactiveapplications"])
+        id: getCommandsProc
         stdout: StdioCollector{
-            onStreamFinished: updateApps(this.text)
+            onStreamFinished: {
+                var text = this.text.trim()
+                if (text) {
+                    var entries = text.split("|")
+                    for (var i = 0; i < entries.length; i++) {
+                        var idx = entries[i].indexOf(":")
+                        if (idx === -1) continue
+                        appBarWidget.commandCache[entries[i].substring(0, idx)] =
+                            entries[i].substring(idx + 1)
+                    }
+                }
+                appBarWidget.rebuildActive()
+            }
         }
-    } 
+    }
 
     // -- LAUNCHER POPUP
     AppBarLaunchPopup {
@@ -1184,9 +1270,12 @@ RoundedBlock{
                 toggleGamingApp(modelData.className)
             } else if (modelData.action === "workspace:send") {
                 var pids = getPIDs(contextTarget.name)
-                workspaceSendPopup.targetPid   = pids.length > 0 ? pids[0] : ""
+                var instances = instanceList(contextTarget.name)
+                workspaceSendPopup.targetPid = pids.length > 0 ? pids[0] : ""
+                workspaceSendPopup.targetAddress =
+                    instances.length > 0 ? instances[0].address : ""
                 workspaceSendPopup.targetClass = contextTarget.name
-                workspaceSendPopup.forceOpen(appBarWidget)
+                workspaceSendPopup.open()
             } else if (modelData.action === "masque:open") {
                 masquePopup.contextTarget = contextTarget
                 masquePopup.forceOpen(appBarWidget)
@@ -1307,7 +1396,7 @@ RoundedBlock{
                         width: parent.width + 6
                         height: parent.height + 4
                         radius: parent.radius + 3
-                        color: root.settings.theme.primary
+                        color: root.theme.primary
                         opacity: 0.6
                         z: -1
                     }
@@ -1499,7 +1588,7 @@ RoundedBlock{
                             if (instanceCount === 0) return "transparent"
                             if (hiddenCount === instanceCount) return "#666666"
                             if (hiddenCount > 0) return "#ffaa00"
-                            return root.settings.theme.primary
+                            return root.theme.primary
                         }
                     }
                 }
@@ -1513,7 +1602,7 @@ RoundedBlock{
             iconName: "dark_mode"
             iconSize: 22
             tooltipText: "Re-enter Gaming Mode"
-            color: root.settings.theme.primary
+            color: root.theme.primary
             visible: (appBarWidget.gamingAppActive || appBarWidget.gamingUserPaused)
                 && !(root.settings.gaming && root.settings.gaming.enabled)
                 && appBarWidget.gamingUserPaused
@@ -1534,7 +1623,7 @@ RoundedBlock{
             iconName: "stop"
             iconSize: 22
             tooltipText: "Stop Gaming Mode (won't re-trigger until game closes)"
-            color: root.settings.theme.text
+            color: root.theme.text
             visible: appBarWidget.gamingAppActive
                 && !(root.settings.gaming && root.settings.gaming.enabled)
                 && appBarWidget.gamingUserPaused
@@ -1550,7 +1639,7 @@ RoundedBlock{
             iconName: "apps"
             iconSize: 26
             tooltipText: "Add App"
-            color: root.settings.theme.text
+            color: root.theme.text
             onClicked: addDropdown.toggle(addAppButton)
         }
     }

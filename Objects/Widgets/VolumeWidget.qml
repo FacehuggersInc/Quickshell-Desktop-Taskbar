@@ -18,9 +18,9 @@ RowLayout{
         if (num >= 60){
             return ['#ff4a4a', "volume_max", num]
         } else if (num >= 50) {
-            return [root.settings.theme.primary, "volume_max", num]
+            return [root.theme.primary, "volume_max", num]
         } else if (num >= 20) {
-            return [root.settings.theme.primary, "volume_med", num]
+            return [root.theme.primary, "volume_med", num]
         } else {
             return ['#fffcfc', "volume_min", num]
         }
@@ -41,7 +41,7 @@ RowLayout{
 
     IconButton {
         id: songButton
-        color: root.settings.theme.primary
+        color: root.theme.primary
         iconName: root.media.status == "Playing" ? "music_note_single" : "music_off"
         iconSize: 22
         visible: root.media.status == "Playing" ? true : (root.media.status == "Paused" ? true : false)
@@ -61,7 +61,7 @@ RowLayout{
         function setState(state){
             if (state.includes("off")){
                 micButton.setIcon("microphone_mute")
-                micButton.setColor(root.settings.theme.primary)
+                micButton.setColor(root.theme.primary)
                 micButton.tooltipText = "Toggle Mic: On"
             } else if (state.includes("on")) { 
                 micButton.setIcon("microphone")

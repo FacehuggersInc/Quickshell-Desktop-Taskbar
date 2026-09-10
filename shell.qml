@@ -8,7 +8,11 @@ import Quickshell.Io
 import Quickshell.Services.Notifications
 
 import qs.Objects.Window
+import qs.Objects.Window.WorkspaceOverview
 import qs.Objects.Systems
+import qs.Objects.Theme
+
+import Quickshell.Hyprland
 
 ShellRoot {
     // INIT
@@ -32,78 +36,176 @@ ShellRoot {
             : Qt.resolvedUrl("./Scripts/utill.py").toString().replace("file://", "")
         return [interpreter, script]
     }
+    // ## Theme
+    // Colour lives in the Theme singleton. config.json holds only what the user
+    // authored — mode source, accent source, accent, glass on/off, scrim
+    // strength. Everything else is derived and never written back.
+
+    readonly property var themeConfig: settings.theme || ({})
+    readonly property var theme: Theme.legacy
+
+    property bool darkMode: true
+
+    function evalDarkMode(){
+        if (settings.forceDarkMode) {
+            root.darkMode = true
+            return
+        }
+        var explicit = root.themeConfig.mode
+        if (explicit === "dark") { root.darkMode = true; return }
+        if (explicit === "light") { root.darkMode = false; return }
+
+        if (root.wallpaperMode === 1) { root.darkMode = false; return }
+        if (root.wallpaperMode === 2) { root.darkMode = true; return }
+
+        var hours = (settings.wallpapers && settings.wallpapers.darkModeHours)
+            ? settings.wallpapers.darkModeHours : { at: 21, before: 6 }
+        var hour = new Date().getHours()
+        root.darkMode = (hour >= hours.at || hour < hours.before)
+    }
+
+    // Seed picked from the wallpaper quantizer: most saturated colour that is
+    // not already near black or white. Theme clamps it after this.
+    readonly property color accentSeed: {
+        var cols = colorQuan.colors
+        if (!cols || cols.length === 0)
+            return Theme.accentFixed
+        var best = cols[0]
+        var bestScore = -1
+        for (var i = 0; i < cols.length; i++) {
+            var c = cols[i]
+            var score = c.hslSaturation * (1 - Math.abs(c.hslLightness - 0.5) * 1.2)
+            if (score > bestScore) {
+                bestScore = score
+                best = c
+            }
+        }
+        return best
+    }
+
+    Timer {
+        id: darkModeTimer
+        interval: 60000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: root.evalDarkMode()
+    }
+
+    Binding { target: Theme; property: "darkMode"; value: root.darkMode }
+    Binding { target: Theme; property: "accentSeed"; value: root.accentSeed }
+    Binding { target: Theme; property: "fontFamily"; value: root.settings.fontFamily || "JetBrainsMono" }
+    Binding {
+        target: Theme
+        property: "glass"
+        value: root.themeConfig.glass !== undefined ? root.themeConfig.glass : true
+    }
+    Binding {
+        target: Theme
+        property: "previewMode"
+        value: root.themeConfig.previews || "still"
+    }
+    Binding {
+        target: Theme
+        property: "panelDimStrength"
+        value: root.themeConfig.panelDim !== undefined ? root.themeConfig.panelDim : 1.0
+    }
+    Binding {
+        target: Theme
+        property: "overlayDimStrength"
+        value: root.themeConfig.overlayDim !== undefined ? root.themeConfig.overlayDim : 1.0
+    }
+    Binding {
+        target: Theme
+        property: "blurMode"
+        value: root.themeConfig.blurMode || "protocol"
+    }
+    Binding {
+        target: Theme
+        property: "accentSource"
+        value: root.themeConfig.accentSource || "fixed"
+    }
+    Binding {
+        target: Theme
+        property: "accentFixed"
+        value: root.themeConfig.accent || root.themeConfig.primary || "#6b5d62"
+    }
+    Binding {
+        target: Theme
+        property: "scrimStrength"
+        value: root.themeConfig.scrimStrength !== undefined ? root.themeConfig.scrimStrength : 1.0
+    }
+
     property bool initialDarkHourCheck: false
     property var monitorResolutions: ({})  // name -> {w, h}
     property var ddcMap: ({})              // connector name -> DDC display number
     property var monitorInfos: []          // full monitor info sorted left-to-right
 
-    // ── Startup batch — replaces separate monitorResProc, detectDisplaysProc, ddcMappingProc
+    // ## Monitors
+    // Read from the Hyprland event socket rather than shelling out to hyprctl.
+    // settings.displays is still persisted so the wallpaper and theater code can
+    // index into a stable left-to-right ordering.
+
+    function syncMonitors() {
+        var mons = HyprlandSystem.monitors
+        if (!mons || mons.length === 0)
+            return
+
+        var res = {}
+        var names = []
+        var focusedIdx = 0
+        for (var i = 0; i < mons.length; i++) {
+            var m = mons[i]
+            res[m.name] = { w: m.w, h: m.h }
+            names.push(m.name)
+            if (m.focused) focusedIdx = i
+        }
+
+        root.monitorResolutions = res
+        root.monitorInfos = mons
+
+        var current = root.settings.displays || []
+        var changed = names.length !== current.length
+        if (!changed) {
+            for (var j = 0; j < names.length; j++) {
+                if (names[j] !== current[j]) { changed = true; break }
+            }
+        }
+        if (changed) {
+            root.settings.displays = names
+            if (root.settings.primaryDisplayIndex === undefined
+                    || root.settings.primaryDisplayIndex === null) {
+                root.settings.primaryDisplayIndex = focusedIdx
+            }
+            root.saveSettings()
+        }
+    }
+
+    Connections {
+        target: HyprlandSystem
+        function onChanged() { root.syncMonitors() }
+    }
+
+    // Brightness reads once at startup rather than on every panel open
+    Binding { target: BrightnessSystem; property: "utillInterpreter"; value: root.utill[0] }
+    Binding { target: BrightnessSystem; property: "utillPath"; value: root.utill[1] }
+
+    // ddcutil is not a Hyprland concern, so this one still shells out
     Process {
-        id: startupBatchProc
-        command: root.newBatch([
-            ["getmonitorres"],
-            ["getdisplays"],
-            ["ddcmapping"]
-        ])
+        id: ddcMappingProc
+        command: root.newUtill(["--ddcmapping"])
         running: true
         stdout: StdioCollector {
             onStreamFinished: {
-                var results = root.parseBatch(this.text)
-
-                // getmonitorres
-                if (results["getmonitorres"]) {
-                    var res = {}
-                    results["getmonitorres"].split("|").forEach(function(entry) {
-                        var parts = entry.split(":")
-                        if (parts.length >= 3)
-                            res[parts[0]] = { w: parseInt(parts[1]), h: parseInt(parts[2]) }
-                    })
-                    root.monitorResolutions = res
-                }
-
-                // getdisplays
-                if (results["getdisplays"] && results["getdisplays"] !== "none") {
-                    var names = []
-                    var infos = []
-                    var focusedIdx = 0
-                    results["getdisplays"].split("\n").forEach(function(line, i) {
-                        var parts = line.split("|")
-                        if (parts.length < 7) return
-                        names.push(parts[0])
-                        infos.push({
-                            name: parts[0], w: parseInt(parts[1]), h: parseInt(parts[2]),
-                            x: parseInt(parts[3]), y: parseInt(parts[4]),
-                            focused: parts[5] === "yes", transform: parseInt(parts[6])
-                        })
-                        if (parts[5] === "yes") focusedIdx = i
-                    })
-                    root.monitorInfos = infos
-
-                    var current = root.settings.displays || []
-                    var changed = names.length !== current.length
-                    if (!changed) {
-                        for (var j = 0; j < names.length; j++) {
-                            if (names[j] !== current[j]) { changed = true; break }
-                        }
-                    }
-                    if (changed) {
-                        root.settings.displays = names
-                        if (root.settings.primaryDisplayIndex === undefined || root.settings.primaryDisplayIndex === null) {
-                            root.settings.primaryDisplayIndex = focusedIdx
-                        }
-                        root.saveSettings()
-                    }
-                }
-
-                // ddcmapping
-                if (results["ddcmapping"] && results["ddcmapping"] !== "none") {
-                    var map = {}
-                    results["ddcmapping"].split("|").forEach(function(entry) {
-                        var parts = entry.split(":")
-                        if (parts.length >= 2) map[parts[0]] = parseInt(parts[1])
-                    })
-                    root.ddcMap = map
-                }
+                var text = this.text.trim()
+                if (!text || text === "none")
+                    return
+                var map = {}
+                text.split("|").forEach(function(entry) {
+                    var parts = entry.split(":")
+                    if (parts.length >= 2) map[parts[0]] = parseInt(parts[1])
+                })
+                root.ddcMap = map
             }
         }
     }
@@ -202,6 +304,8 @@ ShellRoot {
     }
 
     Component.onCompleted: {
+        BrightnessSystem.read()
+
         // Reset theater mode if it was left on from previous session
         var theater = settings.theater || {}
         if (theater.enabled === true) {
@@ -645,46 +749,9 @@ ShellRoot {
     }
 
     // -- THEME
-    Timer{
-        id: themeCheckTimer
-        interval: 100
-        running: false
-        repeat: true
-        onTriggered:{
-            // Only generate theme if autoTheme is enabled
-            if (!root.settings.wallpapers.autoTheme) {
-                themeCheckTimer.running = false
-                return
-            }
-            if (colorQuan.colors.length > 0){
-                var themeCommand = combine( newUtill(["--generatetheme", "dark"]), root.wallpaperColors.colors )
-                themeGenerator.command = themeCommand
-                themeGenerator.running = true
-                themeCheckTimer.repeat = false
-                themeCheckTimer.running = false
-            } 
-        }
-    }
-    Process{
-        id:themeGenerator
-        command: newUtill(["--generatetheme", "dark"])
-        stdout : StdioCollector {
-            onStreamFinished: {
-                var theme = {"mode":"dark"}
-                var obj = this.text.trim()
-                if (!obj) { return }
-                var pairs = obj.split(",")
-                for (var i = 0; i < pairs.length; i++){
-                    var pair = pairs[i].split(":")
-                    theme[pair[0]] = pair[1]
-                }
-
-                settings.theme = theme
-
-                saveSettings()
-            }
-        }
-    }
+    // Colour derivation moved into the Theme singleton. The quantizer output is
+    // read straight from QML, so nothing is generated in Python and nothing is
+    // persisted back to config.json.
 
     // -- WALLPAPERS
     property ColorQuantizer wallpaperColors: ColorQuantizer{
@@ -752,12 +819,46 @@ ShellRoot {
                 }
                 
                 root.wallpaperColors.source = Qt.resolvedUrl(wallpapers[settings.primaryDisplayIndex].trim())
-                themeCheckTimer.repeat = true
-                themeCheckTimer.running = true
             }
         }
     }
 
+    // ## Overview entry points
+    // Two of them, because the bind syntax for the global dispatcher under a Lua
+    // config is not something we have confirmed. The IPC route only needs
+    // exec_cmd, which is verified to work.
+
+    GlobalShortcut {
+        appid: "quickshell"
+        name: "overview"
+        description: "Toggle the workspace overview"
+        onPressed: {
+            console.log("overview: global shortcut pressed")
+            root.overview.toggle()
+        }
+    }
+
+    IpcHandler {
+        id: overviewIpc
+        target: "overview"
+
+        function toggle(): void {
+            console.log("overview: ipc toggle")
+            root.overview.toggle()
+        }
+
+        function open(): void {
+            console.log("overview: ipc open")
+            root.overview.open()
+        }
+
+        function close(): void {
+            console.log("overview: ipc close")
+            root.overview.close()
+        }
+    }
+
     // -- UI OBJECTS
+    property WorkspaceOverview overview: WorkspaceOverview {}
     property MainWindow main: MainWindow {}
 }

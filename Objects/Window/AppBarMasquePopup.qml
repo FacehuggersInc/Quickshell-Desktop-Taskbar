@@ -33,7 +33,7 @@ PopupPanel {
 
             Text {
                 text: "Masque under:"
-                color: root.settings.theme.text
+                color: root.theme.text
                 opacity: 0.55
                 font.family: root.settings.fontFamily
                 font.pixelSize: 12
@@ -44,7 +44,7 @@ PopupPanel {
             IconButton {
                 iconName: "close"
                 iconSize: 14
-                color: root.settings.theme.text
+                color: root.theme.text
                 tooltipText: "Cancel"
                 onClicked: masquePopup.forceClose()
             }
@@ -79,13 +79,13 @@ PopupPanel {
                         font.family: root.settings.fontFamily
                         font.pixelSize: 13
                         font.weight: 500
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         Layout.fillWidth: true
                     }
                 }
                 background: Rectangle {
                     radius: 6
-                    color: masqueHov.hovered ? root.settings.theme.primary : "transparent"
+                    color: masqueHov.hovered ? root.theme.primary : "transparent"
                     opacity: masqueHov.hovered ? 0.18 : 1
                 }
                 HoverHandler { id: masqueHov; cursorShape: Qt.PointingHandCursor }

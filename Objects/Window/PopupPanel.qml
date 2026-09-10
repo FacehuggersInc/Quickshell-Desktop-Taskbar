@@ -1,5 +1,6 @@
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 import QtQuick
 import Quickshell.Widgets
 import QtQuick.Layouts
@@ -8,6 +9,7 @@ import QtQuick.Controls.Material
 import Quickshell.Hyprland
 
 import qs.Objects.Design
+import qs.Objects.Theme
 
 PopupWindow {
     id: popup
@@ -25,6 +27,9 @@ PopupWindow {
         item: display
     }
 
+    BackgroundEffect.blurRegion:
+        (Theme.glass && Theme.blurMode === "protocol") ? display.blurRegion : null
+
     property int sidePadding: 0
     property int tbPadding: 0
 
@@ -33,7 +38,7 @@ PopupWindow {
 
     property bool requireFocusGrab: false
     property bool scrollingEffect: true
-    property double fadingEffectMax: 0.8
+    property double fadingEffectMax: 1.0
     property bool shouldHide: false
     property bool isClosing: false
 
@@ -92,9 +97,9 @@ PopupWindow {
         id: display
         alpha: 0
         height: 0
-        radius: 15
+        radius: Theme.radius
         implicitWidth: popup.implicitWidth
-        color: root.settings.theme.background
+        color: Theme.panelScrim
         sidePadding: sidePadding
         tbPadding: tbPadding
         clip: true

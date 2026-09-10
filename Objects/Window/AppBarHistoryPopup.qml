@@ -1,6 +1,8 @@
 import Quickshell
+import Quickshell.Wayland
 import Quickshell.Io
 import QtQuick
+import QtQuick.Effects
 import QtQuick.Layouts
 import QtQuick.Controls
 import QtQuick.Window
@@ -10,6 +12,7 @@ import Qt5Compat.GraphicalEffects
 import qs.Objects.Design
 import qs.Objects.Widgets
 import qs.Objects.Window
+import qs.Objects.Theme
 
 PopupWindow {
     id: historyPopup
@@ -27,6 +30,10 @@ PopupWindow {
     visible: false
 
     mask: Region { item: background }
+
+    property Region glassBlurRegion: Region { item: background }
+    BackgroundEffect.blurRegion:
+        (Theme.glass && Theme.blurMode === "protocol") ? glassBlurRegion : null
 
     property bool isClosing: false
     property var commands: []
@@ -81,19 +88,20 @@ PopupWindow {
         width: panelWidth
         height: panelHeight
         radius: 15
-        color: root.settings.theme.background
+        color: root.theme.background
+        border.width: Theme.borderWidth
+        border.color: Theme.border
         opacity: 0
         clip: true
 
         layer.enabled: true
-        layer.effect: DropShadow {
-            transparentBorder: true
-            horizontalOffset: 1
-            verticalOffset: 1
-            radius: 20
-            samples: 40
-            color: "#80000000"
-            source: background
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowColor: Theme.shadow
+            shadowBlur: 0.7
+            shadowVerticalOffset: 2
+            shadowHorizontalOffset: 0
+            blurMax: 24
         }
 
         ColumnLayout {
@@ -106,7 +114,7 @@ PopupWindow {
                 Layout.fillWidth: true
                 Text {
                     text: "Command History"
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     font.family: root.settings.fontFamily
                     font.weight: 700
                     font.pixelSize: 16
@@ -115,7 +123,7 @@ PopupWindow {
                 IconButton {
                     iconName: "close"
                     iconSize: 16
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     tooltipText: "Close"
                     onClicked: historyPopup.forceClose()
                 }
@@ -126,7 +134,7 @@ PopupWindow {
                 Layout.fillWidth: true
                 height: 34
                 radius: 8
-                color: root.settings.theme.surface
+                color: root.theme.surface
 
                 RowLayout {
                     anchors.fill: parent
@@ -144,7 +152,7 @@ PopupWindow {
                         id: searchField
                         Layout.fillWidth: true
                         placeholderText: "Search commands..."
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font.family: root.settings.fontFamily
                         font.pixelSize: 13
                         background: Item {}
@@ -159,7 +167,7 @@ PopupWindow {
                 text: historyPopup.commands.length === 0
                     ? "No history found"
                     : "No matches"
-                color: root.settings.theme.text
+                color: root.theme.text
                 opacity: 0.4
                 font.family: root.settings.fontFamily
                 font.pixelSize: 13
@@ -199,7 +207,7 @@ PopupWindow {
                                 }
                                 Text {
                                     text: modelData
-                                    color: root.settings.theme.text
+                                    color: root.theme.text
                                     font.family: root.settings.fontFamily
                                     font.pixelSize: 13
                                     elide: Text.ElideRight
@@ -208,7 +216,7 @@ PopupWindow {
                             }
                             background: Rectangle {
                                 radius: 6
-                                color: cmdHov.hovered ? root.settings.theme.primary : "transparent"
+                                color: cmdHov.hovered ? root.theme.primary : "transparent"
                                 opacity: cmdHov.hovered ? 0.18 : 1
                             }
                             HoverHandler { id: cmdHov; cursorShape: Qt.PointingHandCursor }

@@ -4,37 +4,31 @@ from datetime import datetime
 from urllib.parse import urlparse
 from rapidfuzz import fuzz, process
 
-from theme import build_theme
-
 INVALID = [(" &", ",")]
 PLAYERS = ["Youtube Music", "Spotify", 'Youtube']
 VALID_EXTS = (".png", ".svg", ".xpm")
 
-# ── USER CONFIGURATION ────────────────────────────────────────────────────────
-# Set these to match your system before running.
+## Paths
+## Resolved from the environment. Override the config directory with
+## QUICKSHELL_CONFIG_DIR if the shell lives somewhere other than the default.
 
-# Your Linux username
-USERNAME = "fach"
+HOME = Path(os.environ.get("HOME") or Path.home())
+USERNAME = os.environ.get("USER") or os.environ.get("LOGNAME") or HOME.name
 
-# Quickshell config directory
-CONFIG_DIR = Path(f"/home/{USERNAME}/.config/quickshell")
+XDG_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or (HOME / ".config"))
+CONFIG_DIR = Path(os.environ.get("QUICKSHELL_CONFIG_DIR") or (XDG_CONFIG / "quickshell"))
 
-# config.json path
 CONFIG_JSON = CONFIG_DIR / "config.json"
-
-# Icon cache file
 ICON_CACHE = CONFIG_DIR / ".icon-path-cache"
+DDC_CACHE = CONFIG_DIR / ".ddc-cache"
 
-# Icon search roots — covers system themes, Flatpak exports, and pixmaps
 ICON_ROOTS = [
     "/usr/share/icons",
     "/usr/share/pixmaps",
     "/usr/local/share/icons",
-    f"/home/{USERNAME}/.local/share/icons",
-    # Flatpak — system-wide installs
+    str(HOME / ".local/share/icons"),
     "/var/lib/flatpak/exports/share/icons",
-    # Flatpak — per-user installs
-    f"/home/{USERNAME}/.local/share/flatpak/exports/share/icons",
+    str(HOME / ".local/share/flatpak/exports/share/icons"),
 ]
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -158,19 +152,6 @@ class Utill():
 
     # ── NETWORK ──────────────────────────────────────────────────────────────
 
-    @argfunc
-    def getinterface(self, *args):
-        match args[0]:
-            case "ssid": return "Unknown",
-            case "wired" | "interface":
-                result = subprocess.run(['nmcli'], capture_output=True, text=True)
-                connections = []
-                for line in result.stdout.split('\n'):
-                    if len(line.split(":")) <= 2 and "connected" in line:
-                        if any(inv in line for inv in ["unavailable", "configuration"]): continue
-                        connections.append((line.split(":")[0], "wired" if "Wired" in line else "external"))
-                externals = [c for c in connections if c[1] == "external"]
-                return externals[-1] if len(externals) > 1 else connections[0] if connections else ("unknown", "wired")
 
     @argfunc
     def getnetworkinfo(self, *args):
@@ -410,47 +391,32 @@ class Utill():
 
     @argfunc
     def generatetheme(self, *args):
+        ## colormath is only needed here, so it stays out of module scope —
+        ## every poll spawns this file and paid that import otherwise
+        from theme import build_theme
         return build_theme(args[1:], args[0])
 
     # ── HYPRLAND / WINDOWS ───────────────────────────────────────────────────
 
-    @argfunc
-    def gethyprwindows(self, *args):
-        result = subprocess.run(['hyprctl', 'clients', '-j'], stdout=subprocess.PIPE, text=True)
-        return json.loads(result.stdout.strip())
+
 
     @argfunc
-    def getactiveapplications(self, *args):
-        processes = subprocess.run(['ps', '-eo', 'pid,args'],
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        windows = self.gethyprwindows()
-        proc_map = {}
-        if processes.returncode == 0:
-            for line in processes.stdout.splitlines()[1:]:
-                parts = line.strip().split(None, 1)
-                if len(parts) == 2: proc_map[parts[0]] = parts[1]
-
-        final = []
-        for win in windows:
-            pid = str(win.get('pid'))
-            if not pid: continue
-            win['command'] = proc_map.get(pid, "")
-            final.append((pid, win))
-
-        classes = [p[1]['class'] for p in final]
-        icons   = self.getappicons(*classes).split(",")
-
-        return_str = ""
-        for pid, proc in final:
-            match = [i for i in icons if proc['class'] in i]
-            if match:
-                clazz, icon = match[0].split(":", 1)
-            else:
-                icon = "*"  # will use fallback in QML
-            address = proc.get('address', '')
-            return_str += f"{proc['pid']},{proc['class']},{icon},{proc['command']},{proc['workspace']['name']},{proc['title']},{address}|"
-
-        return return_str.rstrip("|").strip()
+    def getcommands(self, *args):
+        ## Reads /proc/<pid>/cmdline for specific pids. The old path scanned the
+        ## whole process table with ps on every app bar tick; this is called only
+        ## for windows that have not been seen before.
+        out = []
+        for pid in args:
+            cmd = ""
+            try:
+                with open(f"/proc/{int(pid)}/cmdline", "rb") as handle:
+                    raw = handle.read()
+                cmd = raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+            except Exception:
+                cmd = ""
+            cmd = cmd.replace("|", " ").replace(",", " ")
+            out.append(f"{pid}:{cmd}")
+        return "|".join(out)
 
     @argfunc
     def closehyprwindow(self, *args):
@@ -899,36 +865,6 @@ class Utill():
 
     # ── DDC / DISPLAY BRIGHTNESS ─────────────────────────────────────────────
 
-    @argfunc
-    def getdisplays(self, *args):
-        """Returns all connected monitors from Hyprland.
-        Returns newline-separated: name|width|height|x|y|focused|transform
-        e.g. HDMI-A-1|2560|1440|0|0|yes|0
-        """
-        result = subprocess.run(
-            ["hyprctl", "monitors", "-j"],
-            capture_output=True, text=True
-        )
-        try:
-            monitors = json.loads(result.stdout.strip())
-            lines = []
-            for m in monitors:
-                name      = m.get("name", "")
-                w         = m.get("width",  0)
-                h         = m.get("height", 0)
-                x         = m.get("x", 0)
-                y         = m.get("y", 0)
-                focused   = "yes" if m.get("focused", False) else "no"
-                transform = m.get("transform", 0)
-                # Account for 90/270 rotation
-                if transform in [1, 3, 5, 7]:
-                    w, h = h, w
-                lines.append(f"{name}|{w}|{h}|{x}|{y}|{focused}|{transform}")
-            # Sort left to right by x position
-            lines.sort(key=lambda l: int(l.split("|")[3]))
-            return "\n".join(lines) if lines else "none"
-        except Exception:
-            return "none"
 
     @argfunc
     def ddcmapping(self, *args):
@@ -974,23 +910,6 @@ class Utill():
 
         return "|".join([f"{conn}:{num}" for conn, num in mapping.items()]) if mapping else "none"
 
-    @argfunc
-    def ddcdetect(self, *args):
-        result = subprocess.run(["ddcutil", "detect"], capture_output=True, text=True, timeout=10)
-        displays, current_num, current_name = [], None, None
-        for line in result.stdout.splitlines():
-            ls = line.strip()
-            if ls.startswith("Display "):
-                if current_num is not None and current_name is not None:
-                    displays.append(f"{current_num}:{current_name}")
-                try:    current_num  = int(ls.split()[1])
-                except: current_num  = None
-                current_name = None
-            elif ls.startswith("Model:") and current_num is not None:
-                current_name = ls.split(":", 1)[1].strip()
-        if current_num is not None and current_name is not None:
-            displays.append(f"{current_num}:{current_name}")
-        return "|".join(displays) if displays else "none"
 
     @argfunc
     def ddcgetbrightness(self, *args):
@@ -1008,6 +927,110 @@ class Utill():
             except Exception:
                 results.append(f"{d}:0:100")
         return "|".join(results)
+
+    ## ddcutil talks over I2C and is slow — a detect is seconds, a getvcp is
+    ## hundreds of milliseconds. The display list is cached and every per-display
+    ## call is issued in parallel so the cost is one round trip, not N.
+
+    def ddc_displays(self, refresh=False):
+        if not refresh:
+            try:
+                cached = json.loads(DDC_CACHE.read_text())
+                if cached.get("displays"):
+                    return cached["displays"], cached.get("names", {})
+            except Exception:
+                pass
+
+        result = subprocess.run(["ddcutil", "detect"],
+                                capture_output=True, text=True, timeout=20)
+        displays, names = [], {}
+        num, model = None, None
+        for line in result.stdout.splitlines():
+            ls = line.strip()
+            if ls.startswith("Display "):
+                if num is not None:
+                    displays.append(num)
+                    names[str(num)] = model or f"Display {num}"
+                try:
+                    num = int(ls.split()[1])
+                except Exception:
+                    num = None
+                model = None
+            elif ls.startswith("Model:") and num is not None:
+                model = ls.split(":", 1)[1].strip()
+        if num is not None:
+            displays.append(num)
+            names[str(num)] = model or f"Display {num}"
+
+        try:
+            DDC_CACHE.write_text(json.dumps({"displays": displays, "names": names}))
+        except Exception:
+            pass
+        return displays, names
+
+    def ddc_get_one(self, display):
+        try:
+            out = subprocess.run(["ddcutil", "--display", str(display), "getvcp", "10"],
+                                 capture_output=True, text=True, timeout=8).stdout.strip()
+            cur = next((int(p.split("=")[-1].strip())
+                        for p in out.split(",") if "current value" in p), 0)
+            mx = next((int(p.split("=")[-1].strip())
+                       for p in out.split(",") if "max value" in p), 100)
+            return display, cur, mx
+        except Exception:
+            return display, 0, 100
+
+    def ddc_set_one(self, display, value):
+        try:
+            subprocess.run(["ddcutil", "--display", str(display), "setvcp", "10", str(value)],
+                           capture_output=True, timeout=8)
+            return True
+        except Exception:
+            return False
+
+    @argfunc
+    def ddcrefresh(self, *args):
+        displays, names = self.ddc_displays(refresh=True)
+        if not displays:
+            return "none"
+        return "|".join([f"{d}:{names.get(str(d), d)}" for d in displays])
+
+    @argfunc
+    def ddcstatus(self, *args):
+        from concurrent.futures import ThreadPoolExecutor
+
+        displays, names = self.ddc_displays()
+        if not displays:
+            return "none"
+
+        with ThreadPoolExecutor(max_workers=len(displays)) as pool:
+            results = list(pool.map(self.ddc_get_one, displays))
+
+        percents = []
+        parts = []
+        for display, cur, mx in results:
+            pct = round((cur / mx) * 100) if mx > 0 else 0
+            percents.append(pct)
+            parts.append(f"{display}:{pct}:{names.get(str(display), display)}")
+
+        average = round(sum(percents) / len(percents)) if percents else 0
+        return f"{average}#" + "|".join(parts)
+
+    @argfunc
+    def ddcsetall(self, *args):
+        from concurrent.futures import ThreadPoolExecutor
+
+        if not args:
+            return "fail"
+        value = max(0, min(100, int(float(args[0]))))
+
+        displays, _ = self.ddc_displays()
+        if not displays:
+            return "none"
+
+        with ThreadPoolExecutor(max_workers=len(displays)) as pool:
+            list(pool.map(lambda d: self.ddc_set_one(d, value), displays))
+        return "ok"
 
     @argfunc
     def ddcsetbrightness(self, *args):
@@ -1271,32 +1294,6 @@ class Utill():
 
         return tmp.name
 
-    @argfunc
-    def getmonitorres(self, *args):
-        """Returns monitor resolutions as: connector:width:height|...
-        Uses hyprctl monitors -j
-        """
-        result = subprocess.run(
-            ["hyprctl", "monitors", "-j"],
-            capture_output=True, text=True
-        )
-        monitors = {}
-        try:
-            data = json.loads(result.stdout.strip())
-            for m in data:
-                name = m.get("name", "")
-                w    = m.get("width",  0)
-                h    = m.get("height", 0)
-                # Account for transform (90/270 degree rotation swaps w/h)
-                transform = m.get("transform", 0)
-                if transform in [1, 3, 5, 7]:  # 90, 270, flipped+90, flipped+270
-                    w, h = h, w
-                if name:
-                    monitors[name] = (w, h)
-        except Exception:
-            pass
-
-        return "|".join([f"{name}:{w}:{h}" for name, (w, h) in monitors.items()])
 
 
     # ── COLOR HISTORY ────────────────────────────────────────────────────────

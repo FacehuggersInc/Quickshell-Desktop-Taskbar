@@ -1,4 +1,5 @@
 import Quickshell
+import Quickshell.Wayland
 import Quickshell.Io
 import QtQuick
 import Quickshell.Widgets
@@ -9,6 +10,7 @@ import Quickshell.Hyprland
 
 import qs.Objects.Design
 import qs.Objects.Widgets
+import qs.Objects.Theme
 
 PopupWindow {
     id: notificationsPanel
@@ -28,6 +30,9 @@ PopupWindow {
     visible: false
 
     mask: Region { item: panelBackground }
+
+    BackgroundEffect.blurRegion:
+        (Theme.glass && Theme.blurMode === "protocol") ? panelBackground.blurRegion : null
 
     property bool isOpen: false
     property bool isAnimating: false
@@ -82,7 +87,7 @@ PopupWindow {
         x: notificationsPanel.implicitWidth
         y: 0
         radius: 12
-        color: root.settings.theme.background
+        color: root.theme.background
         sidePadding: 0
         tbPadding: 0
         clip: true
@@ -103,7 +108,7 @@ PopupWindow {
 
                 Text {
                     text: "Notifications"
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     font.family: root.settings.fontFamily
                     font.weight: 700
                     font.pixelSize: 20
@@ -115,14 +120,14 @@ PopupWindow {
                     width: countText.implicitWidth + 16
                     height: 24
                     radius: 12
-                    color: root.settings.theme.primary
+                    color: root.theme.primary
                     opacity: 0.8
 
                     Text {
                         id: countText
                         anchors.centerIn: parent
                         text: root.notifyServer.trackedNotifications.values.length
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font.family: root.settings.fontFamily
                         font.weight: 700
                         font.pixelSize: 13
@@ -139,7 +144,7 @@ PopupWindow {
                     contentItem: Text {
                         text: parent.text
                         font: parent.font
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         horizontalAlignment: Text.AlignHCenter
                     }
                     background: Rectangle {
@@ -159,7 +164,7 @@ PopupWindow {
                 IconButton {
                     iconName: "close"
                     iconSize: 20
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     tooltipText: "Close"
                     onClicked: notificationsPanel.close()
                 }
@@ -171,7 +176,7 @@ PopupWindow {
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
                 height: 1
-                color: root.settings.theme.text
+                color: root.theme.text
                 opacity: 0.1
             }
 
@@ -198,7 +203,7 @@ PopupWindow {
                     Text {
                         visible: root.notifyServer.trackedNotifications.values.length === 0
                         text: "No notifications"
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         opacity: 0.4
                         font.family: root.settings.fontFamily
                         font.pixelSize: 16

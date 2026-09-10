@@ -11,7 +11,9 @@ import qs.Objects.Window
 PopupPanel {
     id: popup
     implicitHeight: 350
-    implicitWidth: popupColumn.implicitWidth + 16
+    // Fixed. The content column anchors to its parent, whose width comes from
+    // the popup, so sizing the popup from the column is a binding loop.
+    implicitWidth: 350
     sidePadding: 0
     fadingEffectMax: 1.0
 
@@ -98,7 +100,7 @@ PopupPanel {
 
                         Text {
                             text: modelData.name || ""
-                            color: root.settings.theme.text
+                            color: root.theme.text
                             opacity: 0.35
                             font.family: root.settings.fontFamily
                             font.weight: 600
@@ -108,7 +110,7 @@ PopupPanel {
                         Rectangle {
                             Layout.fillWidth: true
                             height: 1
-                            color: root.settings.theme.text
+                            color: root.theme.text
                             opacity: 0.08
                         }
                     }
@@ -138,7 +140,7 @@ PopupPanel {
                             }
                             Text {
                                 text: actionBtn.text
-                                color: root.settings.theme.text
+                                color: root.theme.text
                                 font: actionBtn.font
                                 horizontalAlignment: Text.AlignLeft
                                 elide: Text.ElideNone
@@ -149,7 +151,7 @@ PopupPanel {
                             Text {
                                 visible: modelData.type === "submenu"
                                 text: "›"
-                                color: root.settings.theme.primary
+                                color: root.theme.primary
                                 font.family: root.settings.fontFamily
                                 font.pixelSize: 18
                                 font.weight: 700
@@ -163,14 +165,14 @@ PopupPanel {
                         background: Rectangle {
                             radius: 6
                             color: btnHov.hovered
-                                ? root.settings.theme.primary
+                                ? root.theme.primary
                                 : "transparent"
                             opacity: btnHov.hovered
                                 ? (modelData.type === "submenu" ? 0.15 : 1.0)
                                 : 1.0
                             border.width: modelData.type === "submenu" && btnHov.hovered ? 1 : 0
                             border.color: modelData.type === "submenu" && btnHov.hovered
-                                ? root.settings.theme.primary
+                                ? root.theme.primary
                                 : "transparent"
                         }
 
@@ -205,7 +207,7 @@ PopupPanel {
                     spacing: 6
                     Text {
                         text: "‹"
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font.family: root.settings.fontFamily
                         font.pixelSize: 18
                         font.weight: 700
@@ -213,7 +215,7 @@ PopupPanel {
                     }
                     Text {
                         text: popup.subMenuTitle
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font.family: root.settings.fontFamily
                         font.weight: 700
                         font.pixelSize: 14
@@ -226,7 +228,7 @@ PopupPanel {
                 HoverHandler { id: backHov; cursorShape: Qt.PointingHandCursor }
                 background: Rectangle {
                     radius: 6
-                    color: backHov.hovered ? root.settings.theme.primary : "transparent"
+                    color: backHov.hovered ? root.theme.primary : "transparent"
                     opacity: backHov.hovered ? 0.2 : 1
                 }
                 onClicked: popup.closeSubMenu()
@@ -235,7 +237,7 @@ PopupPanel {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.leftMargin: 8; Layout.rightMargin: 8
-                height: 1; color: root.settings.theme.text; opacity: 0.08
+                height: 1; color: root.theme.text; opacity: 0.08
             }
 
             // Sub-menu items
@@ -265,7 +267,7 @@ PopupPanel {
                         }
                         Text {
                             text: modelData.name || ""
-                            color: root.settings.theme.text
+                            color: root.theme.text
                             font: parent.parent.font
                             horizontalAlignment: Text.AlignLeft
                             elide: Text.ElideRight
@@ -277,7 +279,7 @@ PopupPanel {
                     background: Rectangle {
                         radius: 6
                         color: subHov.hovered
-                            ? root.settings.theme.primary : "transparent"
+                            ? root.theme.primary : "transparent"
                     }
                     onClicked: {
                         popup.actionTriggered(modelData)

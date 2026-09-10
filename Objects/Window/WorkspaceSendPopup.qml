@@ -1,215 +1,247 @@
 import Quickshell
-import Quickshell.Io
+import Quickshell.Wayland
 import QtQuick
-import Quickshell.Widgets
 import QtQuick.Layouts
-import QtQuick.Controls
-import QtQuick.Window
-import Quickshell.Hyprland
-import Qt5Compat.GraphicalEffects
 
 import qs.Objects.Design
-import qs.Objects.Window
-import qs.Objects.Widgets
+import qs.Objects.Theme
+import qs.Objects.Systems
+import qs.Objects.Window.WorkspaceOverview
 
-// Shared popup — used by WorkspaceSwitcher right-click AND AppBar "Send to workspace"
-// Caller sets targetPid or targetClass before opening
-PopupWindow {
-    id: workspaceSendPopup
+PanelWindow {
+    id: sendPopup
 
-    anchor.window: mainWindow
-    anchor.rect.x: 0
-    anchor.rect.y: mainWindow.height + 5
-
-    property int panelWidth: 200
-    property int panelHeight: sendColumn.implicitHeight + 16
-
-    implicitWidth: panelWidth
-    implicitHeight: Math.max(panelHeight, 60)
-    color: "transparent"
     visible: false
+    color: "transparent"
 
-    // Set one of these before opening
-    property string targetPid: ""    // send a specific PID
-    property string targetClass: ""  // send all windows of a class
-    property int targetWorkspaceId: 0  // pre-selected workspace (from dot right-click)
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.namespace: "quickshell:send"
+    WlrLayershell.keyboardFocus: sendPopup.visible ? WlrKeyboardFocus.Exclusive
+                                                   : WlrKeyboardFocus.None
 
-    property var workspaceData: []
+    anchors {
+        top: true
+        bottom: true
+        left: true
+        right: true
+    }
+    exclusiveZone: 0
 
-    mask: Region { item: background }
-    property bool isClosing: false
+    screen: {
+        var target = HyprlandSystem.focusedMonitor
+        var list = Quickshell.screens
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].name === target)
+                return list[i]
+        }
+        return list.length > 0 ? list[0] : null
+    }
 
-    PropertyAnimation {
-        id: alphaAnim
-        target: background
-        property: "opacity"
-        duration: 120
-        onFinished: {
-            if (workspaceSendPopup.isClosing) {
-                workspaceSendPopup.visible = false
-                workspaceSendPopup.isClosing = false
-                background.opacity = 0
+    property Region glassBlurRegion: Region { item: card }
+    BackgroundEffect.blurRegion:
+        (sendPopup.visible && Theme.glass && Theme.blurMode === "protocol")
+            ? glassBlurRegion : null
+
+    property string targetAddress: ""
+    property string targetClass: ""
+    property string targetPid: ""
+
+    property real tileHeight: 170
+
+    // ## Owner contract
+    // MonitorTile and WindowTile expect an owner. Nothing here drags, so the
+    // drag half is inert and only the preview tick is real.
+
+    signal previewTick()
+    readonly property string dragAddress: ""
+    readonly property string dropTarget: ""
+
+    function open() {
+        HyprlandSystem.refresh()
+        sendPopup.visible = true
+        keyHandler.forceActiveFocus()
+        tickTimer.restart()
+    }
+
+    function close() {
+        sendPopup.visible = false
+    }
+
+    function toggle() {
+        if (sendPopup.visible) close()
+        else open()
+    }
+
+    Timer {
+        id: tickTimer
+        interval: 140
+        onTriggered: sendPopup.previewTick()
+    }
+
+    function sendTo(monitorName) {
+        var mon = HyprlandSystem.monitorByName(monitorName)
+        if (!mon) {
+            close()
+            return
+        }
+
+        if (sendPopup.targetAddress !== "") {
+            HyprlandSystem.moveWindowToWorkspace(
+                sendPopup.targetAddress, mon.activeWorkspaceId, false)
+        } else if (sendPopup.targetClass !== "") {
+            var wins = HyprlandSystem.windowsInClass(sendPopup.targetClass)
+            for (var i = 0; i < wins.length; i++) {
+                HyprlandSystem.moveWindowToWorkspace(
+                    wins[i].address, mon.activeWorkspaceId, false)
             }
         }
+        close()
     }
 
-    HyprlandFocusGrab {
-        id: focusGrab
-        active: false
-        windows: [ workspaceSendPopup ]
-        onCleared: {
-            alphaAnim.stop()
-            workspaceSendPopup.isClosing = false
-            workspaceSendPopup.visible = false
-            background.opacity = 0
-        targetPid = ""
-        targetClass = ""
+    function stashTo(bucket) {
+        if (sendPopup.targetAddress !== "")
+            HyprlandSystem.stashWindow(sendPopup.targetAddress, bucket)
+        close()
+    }
+
+    readonly property var bucketNames: {
+        var names = (root.settings.buckets || []).slice()
+        var live = HyprlandSystem.specialWorkspaces()
+        for (var i = 0; i < live.length; i++) {
+            var short = live[i].name.replace("special:", "")
+            if (names.indexOf(short) === -1)
+                names.push(short)
         }
+        return names
     }
 
-    Process {
-        id: wsListProc
-        command: root.cmd("hypr_list_workspaces")
-        stdout: StdioCollector {
-            onStreamFinished: {
-                try {
-                    var data = JSON.parse(this.text.trim())
-                    var ws = []
-                    for (var i = 0; i < data.length; i++) {
-                        if (data[i].id < 1) continue
-                        ws.push({ id: data[i].id, windows: data[i].windows || 0 })
-                    }
-                    ws.sort(function(a, b) { return a.id - b.id })
-                    // Add next empty workspace
-                    var ids = ws.map(function(w) { return w.id })
-                    var next = 1
-                    while (ids.indexOf(next) !== -1) next++
-                    ws.push({ id: next, windows: 0 })
-                    workspaceSendPopup.workspaceData = ws
-                } catch(e) {}
-            }
-        }
-    }
-
-    function sendToWorkspace(wsId) {
-        var dispatch = targetPid !== ""
-            ? root.cmd("hypr_move_window", {"workspace": wsId, "pid": targetPid})
-            : root.cmd("hypr_move_window_class", {"workspace": wsId, "class": targetClass})
-        root.execute(dispatch)
-        workspaceSendPopup.forceClose()
+    Item {
+        id: keyHandler
+        anchors.fill: parent
+        focus: sendPopup.visible
+        Keys.onEscapePressed: sendPopup.close()
     }
 
     Rectangle {
-        id: background
-        width: panelWidth
-        height: Math.max(workspaceSendPopup.panelHeight, 60)
-        radius: 10
-        color: root.settings.theme.background
-        opacity: 0
-        clip: true
+        anchors.fill: parent
+        color: Theme.overlayScrim
 
-        layer.enabled: true
-        layer.effect: DropShadow {
-            transparentBorder: true
-            horizontalOffset: 1
-            verticalOffset: 1
-            radius: 14
-            samples: 28
-            color: "#80000000"
-            source: background
+        MouseArea {
+            anchors.fill: parent
+            onClicked: sendPopup.close()
         }
+    }
+
+    Rectangle {
+        id: card
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 100, column.implicitWidth + 44)
+        height: column.implicitHeight + 44
+        radius: Theme.radius
+        color: Theme.panelScrim
+        border.width: Theme.borderWidth
+        border.color: Theme.borderStrong
 
         ColumnLayout {
-            id: sendColumn
-            anchors.fill: parent
-            anchors.margins: 8
-            spacing: 2
+            id: column
+            x: 22
+            y: 22
+            width: card.width - 44
+            spacing: 14
 
             Text {
-                text: "Send to workspace"
-                color: root.settings.theme.text
-                opacity: 0.55
-                font.family: root.settings.fontFamily
-                font.pixelSize: 11
-                font.weight: 600
-                Layout.bottomMargin: 2
+                Layout.alignment: Qt.AlignHCenter
+                text: sendPopup.targetClass !== ""
+                    ? "Send " + sendPopup.targetClass + " to"
+                    : "Send window to"
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: 15
+                font.weight: 700
             }
 
-            Repeater {
-                model: workspaceSendPopup.workspaceData
-                delegate: RoundButton {
-                    required property var modelData
-                    Layout.fillWidth: true
-                    padding: 5
-                    horizontalPadding: 10
+            Flow {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.maximumWidth: sendPopup.width - 160
+                spacing: 22
 
-                    contentItem: RowLayout {
-                        spacing: 8
+                Repeater {
+                    model: HyprlandSystem.monitors
 
-                        // Dot indicator
-                        Rectangle {
-                            width: 8; height: 8
-                            radius: 4
-                            color: modelData.id === workspaceSendPopup.targetWorkspaceId
-                                ? root.settings.theme.primary
-                                : modelData.windows > 0
-                                    ? root.settings.theme.text
-                                    : root.settings.theme.surface
-                            opacity: modelData.windows > 0 ? 0.8 : 0.3
-                        }
+                    delegate: MonitorTile {
+                        required property var modelData
 
-                        Text {
-                            text: "Workspace " + modelData.id
-                                + (modelData.windows === 0 ? "  (empty)" : "  (" + modelData.windows + ")")
-                            font.family: root.settings.fontFamily
-                            font.pixelSize: 13
-                            color: root.settings.theme.text
-                            Layout.fillWidth: true
-                        }
+                        monitor: modelData
+                        owner: sendPopup
+                        tileHeight: sendPopup.tileHeight
+                        selectMode: true
+                        onSelected: sendPopup.sendTo(modelData.name)
                     }
-
-                    background: Rectangle {
-                        radius: 6
-                        color: wsHov.hovered ? root.settings.theme.primary : "transparent"
-                        opacity: wsHov.hovered ? 0.18 : 1
-                    }
-                    HoverHandler { id: wsHov; cursorShape: Qt.PointingHandCursor }
-                    onClicked: workspaceSendPopup.sendToWorkspace(modelData.id)
                 }
             }
+
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: 8
+                visible: sendPopup.bucketNames.length > 0
+                    && sendPopup.targetAddress !== ""
+                text: "or stash it"
+                color: Theme.textMute
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.descSize
+            }
+
+            Flow {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.maximumWidth: sendPopup.width - 160
+                spacing: 8
+                visible: sendPopup.bucketNames.length > 0
+                    && sendPopup.targetAddress !== ""
+
+                Repeater {
+                    model: sendPopup.bucketNames
+
+                    delegate: Rectangle {
+                        required property var modelData
+
+                        width: bucketText.implicitWidth + 26
+                        height: 32
+                        radius: Theme.radiusSmall
+                        color: bucketArea.containsMouse ? Theme.alpha(Theme.accent, 0.22)
+                                                        : Theme.alpha(Theme.scrimBase, 0.45)
+                        border.width: Theme.borderWidth
+                        border.color: Theme.border
+
+                        Text {
+                            id: bucketText
+                            anchors.centerIn: parent
+                            text: modelData.indexOf("bucket-") === 0
+                                ? "Bucket " + modelData.substring(7) : modelData
+                            color: Theme.text
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.valueSize
+                            font.weight: 600
+                        }
+
+                        MouseArea {
+                            id: bucketArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: sendPopup.stashTo(modelData)
+                        }
+                    }
+                }
+            }
+
+            Text {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: 4
+                text: "esc to cancel"
+                color: Theme.textMute
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.descSize
+            }
         }
-    }
-
-    function updatePosition(widget) {
-        let pos = mainWindow.itemPosition(widget)
-        workspaceSendPopup.anchor.rect.x = (pos.x + widget.width / 2) - panelWidth / 2
-    }
-
-    function forceOpen(widget) {
-        if (isClosing) { alphaAnim.stop(); isClosing = false }
-        updatePosition(widget)
-        background.opacity = 0
-        workspaceSendPopup.visible = true
-        alphaAnim.from = 0
-        alphaAnim.to = 1.0
-        alphaAnim.start()
-        focusGrab.active = true
-        if (!wsListProc.running) wsListProc.running = true
-    }
-
-    function forceClose() {
-        if (isClosing) return
-        isClosing = true
-        alphaAnim.from = background.opacity
-        alphaAnim.to = 0
-        alphaAnim.start()
-        focusGrab.active = false
-        targetPid = ""
-        targetClass = ""
-    }
-
-    function toggle(widget) {
-        if (!workspaceSendPopup.visible || isClosing) forceOpen(widget)
-        else forceClose()
     }
 }

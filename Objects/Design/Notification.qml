@@ -7,6 +7,7 @@ import QtQuick.Controls
 
 import qs.Objects.Design
 import qs.Objects.Widgets
+import qs.Objects.Theme
 
 RoundedBlock {
     id: display
@@ -16,7 +17,7 @@ RoundedBlock {
     rightPadding: 12
     topPadding: 12
     bottomPadding: 12
-    color: root.settings.theme.surface
+    color: Theme.panelScrim
 
     // The live Notification object from the server
     property var notification: null
@@ -47,13 +48,13 @@ RoundedBlock {
                 id: notifyIcon
                 iconName: display.icon
                 iconSize: 20
-                color: root.settings.theme.primary
+                color: root.theme.primary
                 tooltipText: notification ? notification.appName : ""
             }
 
             Text {
                 text: display.title
-                color: root.settings.theme.text
+                color: root.theme.text
                 font.weight: 600
                 font.family: root.settings.fontFamily
                 font.pixelSize: 16
@@ -63,7 +64,7 @@ RoundedBlock {
 
             Text {
                 text: notification ? notification.appName : ""
-                color: root.settings.theme.text
+                color: root.theme.text
                 opacity: 0.5
                 font.family: root.settings.fontFamily
                 font.pixelSize: 12
@@ -84,7 +85,7 @@ RoundedBlock {
         // ── Body text ────────────────────────────────────────────
         Text {
             text: display.body
-            color: root.settings.theme.text
+            color: root.theme.text
             font.family: root.settings.fontFamily
             font.pixelSize: 14
             opacity: 0.85
@@ -117,12 +118,12 @@ RoundedBlock {
                     contentItem: Text {
                         text: parent.text
                         font: parent.font
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         horizontalAlignment: Text.AlignHCenter
                     }
                     background: Rectangle {
                         radius: 6
-                        color: root.settings.theme.primary
+                        color: root.theme.primary
                         opacity: 0.25
                     }
                     HoverHandler { cursorShape: Qt.PointingHandCursor }

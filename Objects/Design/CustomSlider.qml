@@ -9,10 +9,10 @@ Slider {
     property int handleRadius: 10
     property int handleBorderWidth: 1
     property int handleSize: 15
-    property string trackColor: root.settings.theme.surface
-    property string progressColor: root.settings.theme.primary
-    property string handleColor: root.settings.theme.primary
-    property string handleBorderColor: root.settings.theme.primary
+    property string trackColor: root.theme.surface
+    property string progressColor: root.theme.primary
+    property string handleColor: root.theme.primary
+    property string handleBorderColor: root.theme.primary
 
     // --- TRACK (background) ---
     background: Item {

@@ -1,6 +1,8 @@
 import Quickshell
+import Quickshell.Wayland
 import Quickshell.Io
 import QtQuick
+import QtQuick.Effects
 import Quickshell.Widgets
 import QtQuick.Layouts
 import QtQuick.Controls
@@ -9,8 +11,10 @@ import Quickshell.Hyprland
 import Qt5Compat.GraphicalEffects
 
 import qs.Objects.Design
+import qs.Objects.Design.Controls
 import qs.Objects.Window
 import qs.Objects.Widgets
+import qs.Objects.Theme
 
 PopupWindow {
     id: bluetoothPopup
@@ -28,6 +32,10 @@ PopupWindow {
     visible: false
 
     mask: Region { item: background }
+
+    property Region glassBlurRegion: Region { item: background }
+    BackgroundEffect.blurRegion:
+        (Theme.glass && Theme.blurMode === "protocol") ? glassBlurRegion : null
 
     property bool isClosing: false
     property bool powered: false
@@ -244,19 +252,20 @@ PopupWindow {
         width: panelWidth
         height: panelHeight
         radius: 15
-        color: root.settings.theme.background
+        color: root.theme.background
+        border.width: Theme.borderWidth
+        border.color: Theme.border
         opacity: 0
         clip: true
 
         layer.enabled: true
-        layer.effect: DropShadow {
-            transparentBorder: true
-            horizontalOffset: 1
-            verticalOffset: 1
-            radius: 25
-            samples: 100
-            color: "#80000000"
-            source: background
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowColor: Theme.shadow
+            shadowBlur: 0.7
+            shadowVerticalOffset: 2
+            shadowHorizontalOffset: 0
+            blurMax: 24
         }
 
         ColumnLayout {
@@ -274,7 +283,7 @@ PopupWindow {
                     iconName: bluetoothPopup.powered ? "bluetooth" : "bluetooth_disabled"
                     iconSize: 24
                     color: bluetoothPopup.powered
-                        ? root.settings.theme.primary
+                        ? root.theme.primary
                         : "#666666"
                     tooltipText: "Toggle Bluetooth"
                     onClicked: togglePower()
@@ -282,7 +291,7 @@ PopupWindow {
 
                 Text {
                     text: "Bluetooth"
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     font.family: root.settings.fontFamily
                     font.weight: 700
                     font.pixelSize: 18
@@ -293,7 +302,7 @@ PopupWindow {
                     id: powerLabel
                     text: bluetoothPopup.powered ? "On" : "Off"
                     color: bluetoothPopup.powered
-                        ? root.settings.theme.primary
+                        ? root.theme.primary
                         : "#666666"
                     font.family: root.settings.fontFamily
                     font.pixelSize: 13
@@ -304,8 +313,8 @@ PopupWindow {
                     iconName: bluetoothPopup.scanning ? "bluetooth_searching" : "search"
                     iconSize: 20
                     color: bluetoothPopup.scanning
-                        ? root.settings.theme.primary
-                        : root.settings.theme.text
+                        ? root.theme.primary
+                        : root.theme.text
                     tooltipText: bluetoothPopup.scanning ? "Scanning..." : "Scan for devices"
                     opacity: bluetoothPopup.powered ? 1.0 : 0.3
                     onClicked: if (bluetoothPopup.powered) startScan()
@@ -316,7 +325,7 @@ PopupWindow {
             Text {
                 id: scanStatusText
                 text: ""
-                color: root.settings.theme.primary
+                color: root.theme.primary
                 font.family: root.settings.fontFamily
                 font.pixelSize: 12
                 opacity: 0.8
@@ -335,7 +344,7 @@ PopupWindow {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: root.settings.theme.text
+                color: root.theme.text
                 opacity: 0.1
             }
 
@@ -353,9 +362,8 @@ PopupWindow {
                     spacing: 4
 
                     // ── Paired devices ────────────────────────────
-                    TextDivider {
-                        dividerText: "Paired Devices"
-                        dividerHeight: 2
+                    SectionLabel {
+                        text: "Paired Devices"
                         Layout.fillWidth: true
                         visible: bluetoothPopup.pairedDevices.length > 0
                     }
@@ -364,7 +372,7 @@ PopupWindow {
                         text: bluetoothPopup.powered
                             ? "No paired devices"
                             : "Bluetooth is off"
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         opacity: 0.4
                         font.family: root.settings.fontFamily
                         font.pixelSize: 13
@@ -376,117 +384,83 @@ PopupWindow {
 
                     Repeater {
                         model: bluetoothPopup.pairedDevices
+
                         delegate: RoundedBlock {
+                            id: pairedRow
                             required property var modelData
+
+                            readonly property bool connecting:
+                                bluetoothPopup.connectingMac === modelData.mac
+
                             Layout.fillWidth: true
-                            color: root.settings.theme.surface
+                            color: Theme.alpha(Theme.textBase, 0.08)
                             alpha: 1.0
-                            radius: 10
+                            radius: Theme.radiusSmall
+                            border: true
+                            highlight: false
+                            elevated: false
                             sidePadding: 10
                             tbPadding: 8
 
                             RowLayout {
                                 width: parent.width - 20
-                                spacing: 10
+                                spacing: Theme.gap
 
-                                IconButton {
-                                    iconName: modelData.connected ? "bluetooth_connected" : "bluetooth"
-                                    iconSize: 16
-                                    tooltipText: modelData.connected ? "Connected" : "Not connected"
-                                    color: modelData.connected
-                                        ? root.settings.theme.primary
-                                        : "#444444"
+                                Icon {
+                                    iconName: modelData.connected
+                                        ? "bluetooth_connected" : "bluetooth"
+                                    iconSize: 18
+                                    color: modelData.connected ? Theme.accentIcon : Theme.textMute
                                 }
 
                                 ColumnLayout {
                                     Layout.fillWidth: true
-                                    spacing: 2
+                                    spacing: 1
 
                                     Text {
-                                        text: modelData.alias !== modelData.name
-                                            ? modelData.alias
-                                            : modelData.name
-                                        color: root.settings.theme.text
-                                        font.family: root.settings.fontFamily
-                                        font.weight: 600
-                                        font.pixelSize: 14
-                                        elide: Text.ElideRight
                                         Layout.fillWidth: true
+                                        text: modelData.alias !== modelData.name
+                                            ? modelData.alias : modelData.name
+                                        color: Theme.text
+                                        font.family: Theme.fontFamily
+                                        font.weight: 600
+                                        font.pixelSize: Theme.labelSize
+                                        elide: Text.ElideRight
                                     }
 
                                     RowLayout {
                                         spacing: 8
+
                                         Text {
                                             text: modelData.mac
-                                            color: root.settings.theme.text
-                                            opacity: 0.4
-                                            font.family: root.settings.fontFamily
-                                            font.pixelSize: 11
+                                            color: Theme.textMute
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.descSize
                                         }
+
                                         Text {
                                             visible: modelData.battery !== ""
-                                            text: modelData.battery !== ""
-                                                ? "🔋 " + modelData.battery + "%"
-                                                : ""
+                                            text: modelData.battery + "%"
                                             color: {
                                                 var b = parseInt(modelData.battery)
-                                                if (b <= 20) return "#ff4a4a"
-                                                if (b <= 50) return "#ffaa00"
-                                                return root.settings.theme.primary
+                                                if (b <= 20) return Theme.danger
+                                                if (b <= 50) return Theme.warn
+                                                return Theme.ok
                                             }
-                                            font.family: root.settings.fontFamily
-                                            font.pixelSize: 11
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: Theme.descSize
+                                            font.weight: 600
                                         }
                                     }
                                 }
 
-                                // Connect / Disconnect button — shows spinner while connecting
-                                RoundButton {
-                                    id: connectBtn
-                                    property bool isConnecting: bluetoothPopup.connectingMac === modelData.mac
-                                    text: isConnecting ? "..." : (modelData.connected ? "Disconnect" : "Connect")
-                                    enabled: !isConnecting
-                                    font.family: root.settings.fontFamily
-                                    font.pixelSize: 12
-                                    padding: 4
-                                    horizontalPadding: 10
-
-                                    contentItem: RowLayout {
-                                        spacing: 4
-                                        // Spinning icon while connecting
-                                        Image {
-                                            visible: connectBtn.isConnecting
-                                            source: root.iconSource("sync")
-                                            width: 14; height: 14
-                                            sourceSize.width: 14; sourceSize.height: 14
-                                            fillMode: Image.PreserveAspectFit
-
-                                            RotationAnimation on rotation {
-                                                running: connectBtn.isConnecting
-                                                loops: Animation.Infinite
-                                                from: 0; to: 360
-                                                duration: 1000
-                                            }
-                                        }
-                                        Text {
-                                            text: connectBtn.text
-                                            font: connectBtn.font
-                                            color: root.settings.theme.text
-                                            horizontalAlignment: Text.AlignHCenter
-                                        }
-                                    }
-
-                                    background: Rectangle {
-                                        radius: 6
-                                        color: connectBtn.isConnecting
-                                            ? root.settings.theme.surface
-                                            : modelData.connected
-                                                ? "#555555"
-                                                : root.settings.theme.primary
-                                        opacity: connectBtn.isConnecting ? 0.5 : 0.7
-                                    }
-                                    HoverHandler { cursorShape: Qt.PointingHandCursor }
-                                    onClicked: {
+                                ActionButton {
+                                    label: pairedRow.connecting
+                                        ? "Connecting"
+                                        : (modelData.connected ? "Disconnect" : "Connect")
+                                    tone: modelData.connected ? "neutral" : "accent"
+                                    busy: pairedRow.connecting
+                                    onActivated: {
                                         if (modelData.connected)
                                             disconnectDevice(modelData.mac, modelData.alias)
                                         else
@@ -494,81 +468,74 @@ PopupWindow {
                                     }
                                 }
 
-                                // Forget button
-                                IconButton {
-                                    iconName: "delete"
-                                    iconSize: 16
-                                    color: "#e05555"
-                                    tooltipText: "Forget device"
-                                    onClicked: forgetDevice(modelData.mac, modelData.alias)
+                                ActionButton {
+                                    label: "Forget"
+                                    tone: "danger"
+                                    onActivated: forgetDevice(modelData.mac, modelData.alias)
                                 }
                             }
                         }
                     }
 
                     // ── Scan results ──────────────────────────────
-                    TextDivider {
-                        dividerText: "Nearby Devices"
-                        dividerHeight: 2
+                    SectionLabel {
+                        text: "Nearby Devices"
                         Layout.fillWidth: true
                         visible: bluetoothPopup.scanResults.length > 0
                     }
 
                     Repeater {
                         model: bluetoothPopup.scanResults
+
                         delegate: RoundedBlock {
                             required property var modelData
+
                             Layout.fillWidth: true
-                            color: root.settings.theme.surface
-                            alpha: 0.6
-                            radius: 10
+                            color: Theme.alpha(Theme.textBase, 0.05)
+                            alpha: 1.0
+                            radius: Theme.radiusSmall
+                            border: true
+                            highlight: false
+                            elevated: false
                             sidePadding: 10
                             tbPadding: 8
 
                             RowLayout {
                                 width: parent.width - 20
-                                spacing: 10
+                                spacing: Theme.gap
+
+                                Icon {
+                                    iconName: "bluetooth_searching"
+                                    iconSize: 18
+                                    color: Theme.textMute
+                                }
 
                                 ColumnLayout {
                                     Layout.fillWidth: true
-                                    spacing: 2
+                                    spacing: 1
+
                                     Text {
-                                        text: modelData.name
-                                        color: root.settings.theme.text
-                                        font.family: root.settings.fontFamily
-                                        font.weight: 500
-                                        font.pixelSize: 14
-                                        elide: Text.ElideRight
                                         Layout.fillWidth: true
+                                        text: modelData.name
+                                        color: Theme.text
+                                        font.family: Theme.fontFamily
+                                        font.weight: 500
+                                        font.pixelSize: Theme.labelSize
+                                        elide: Text.ElideRight
                                     }
+
                                     Text {
                                         text: modelData.mac
-                                        color: root.settings.theme.text
-                                        opacity: 0.4
-                                        font.family: root.settings.fontFamily
-                                        font.pixelSize: 11
+                                        color: Theme.textMute
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: Theme.descSize
                                     }
                                 }
 
-                                RoundButton {
-                                    text: "Pair"
-                                    font.family: root.settings.fontFamily
-                                    font.pixelSize: 12
-                                    padding: 4
-                                    horizontalPadding: 10
-                                    contentItem: Text {
-                                        text: parent.text
-                                        font: parent.font
-                                        color: root.settings.theme.text
-                                        horizontalAlignment: Text.AlignHCenter
-                                    }
-                                    background: Rectangle {
-                                        radius: 6
-                                        color: root.settings.theme.primary
-                                        opacity: 0.7
-                                    }
-                                    HoverHandler { cursorShape: Qt.PointingHandCursor }
-                                    onClicked: pairDevice(modelData.mac, modelData.name)
+                                ActionButton {
+                                    label: "Pair"
+                                    tone: "accent"
+                                    onActivated: pairDevice(modelData.mac, modelData.name)
                                 }
                             }
                         }

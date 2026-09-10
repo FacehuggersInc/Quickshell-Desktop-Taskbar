@@ -1,6 +1,8 @@
 import Quickshell
+import Quickshell.Wayland
 import Quickshell.Io
 import QtQuick
+import QtQuick.Effects
 import QtQuick.Layouts
 import QtQuick.Controls
 import QtQuick.Window
@@ -10,6 +12,7 @@ import Qt5Compat.GraphicalEffects
 import qs.Objects.Design
 import qs.Objects.Window
 import qs.Objects.Widgets
+import qs.Objects.Theme
 
 PopupWindow {
     id: networkPopup
@@ -27,6 +30,10 @@ PopupWindow {
     visible: false
 
     mask: Region { item: background }
+
+    property Region glassBlurRegion: Region { item: background }
+    BackgroundEffect.blurRegion:
+        (Theme.glass && Theme.blurMode === "protocol") ? glassBlurRegion : null
 
     MouseArea { anchors.fill: parent; z: -1; onClicked: networkPopup.forceClose() }
 
@@ -96,21 +103,22 @@ PopupWindow {
         width: panelWidth
         height: panelHeight
         radius: 15
-        color: root.settings.theme.background
+        color: root.theme.background
+        border.width: Theme.borderWidth
+        border.color: Theme.border
         opacity: 0
         clip: true
 
         MouseArea { anchors.fill: parent; onClicked: {} }
 
         layer.enabled: true
-        layer.effect: DropShadow {
-            transparentBorder: true
-            horizontalOffset: 1
-            verticalOffset: 1
-            radius: 20
-            samples: 40
-            color: "#80000000"
-            source: background
+        layer.effect: MultiEffect {
+            shadowEnabled: true
+            shadowColor: Theme.shadow
+            shadowBlur: 0.7
+            shadowVerticalOffset: 2
+            shadowHorizontalOffset: 0
+            blurMax: 24
         }
 
         ColumnLayout {
@@ -128,7 +136,7 @@ PopupWindow {
                             : networkPopup.netType === "wireless" ? "wifi_max"
                             : "wired"
                     iconSize: 32
-                    color: root.settings.theme.primary
+                    color: root.theme.primary
                     tooltipText: networkPopup.netType
                 }
 
@@ -137,7 +145,7 @@ PopupWindow {
                     spacing: 2
                     Text {
                         text: networkPopup.netInterface
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         font.family: root.settings.fontFamily
                         font.weight: 700
                         font.pixelSize: 16
@@ -148,7 +156,7 @@ PopupWindow {
                         text: networkPopup.netType === "wired"    ? "Wired connection"
                             : networkPopup.netType === "wireless" ? "Wireless connection"
                             : "Network connection"
-                        color: root.settings.theme.text
+                        color: root.theme.text
                         opacity: 0.5
                         font.family: root.settings.fontFamily
                         font.pixelSize: 12
@@ -160,7 +168,7 @@ PopupWindow {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: root.settings.theme.text
+                color: root.theme.text
                 opacity: 0.08
             }
 
@@ -173,8 +181,8 @@ PopupWindow {
                     iconName: "vpn"
                     iconSize: 20
                     color: networkPopup.netVpn !== "no"
-                        ? root.settings.theme.primary
-                        : root.settings.theme.text
+                        ? root.theme.primary
+                        : root.theme.text
                     opacity: networkPopup.netVpn !== "no" ? 1.0 : 0.3
                     tooltipText: "VPN"
                 }
@@ -183,7 +191,7 @@ PopupWindow {
                     text: networkPopup.netVpn !== "no"
                         ? "VPN: " + networkPopup.netVpn
                         : "No VPN"
-                    color: root.settings.theme.text
+                    color: root.theme.text
                     opacity: networkPopup.netVpn !== "no" ? 1.0 : 0.4
                     font.family: root.settings.fontFamily
                     font.pixelSize: 13
@@ -211,14 +219,14 @@ PopupWindow {
                         spacing: 0
                         Text {
                             text: "Download"
-                            color: root.settings.theme.text
+                            color: root.theme.text
                             opacity: 0.5
                             font.family: root.settings.fontFamily
                             font.pixelSize: 11
                         }
                         Text {
                             text: networkPopup.formatSpeed(networkPopup.netRxSpeed)
-                            color: root.settings.theme.text
+                            color: root.theme.text
                             font.family: root.settings.fontFamily
                             font.weight: 600
                             font.pixelSize: 14
@@ -226,7 +234,7 @@ PopupWindow {
                     }
                 }
 
-                Rectangle { width: 1; height: 30; color: root.settings.theme.text; opacity: 0.1 }
+                Rectangle { width: 1; height: 30; color: root.theme.text; opacity: 0.1 }
 
                 // Upload
                 RowLayout {
@@ -242,14 +250,14 @@ PopupWindow {
                         spacing: 0
                         Text {
                             text: "Upload"
-                            color: root.settings.theme.text
+                            color: root.theme.text
                             opacity: 0.5
                             font.family: root.settings.fontFamily
                             font.pixelSize: 11
                         }
                         Text {
                             text: networkPopup.formatSpeed(networkPopup.netTxSpeed)
-                            color: root.settings.theme.text
+                            color: root.theme.text
                             font.family: root.settings.fontFamily
                             font.weight: 600
                             font.pixelSize: 14

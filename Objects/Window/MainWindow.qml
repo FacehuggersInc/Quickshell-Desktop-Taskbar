@@ -1,5 +1,6 @@
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 import QtQuick
 import QtQuick.Window
 import QtQuick.Controls
@@ -8,6 +9,8 @@ import QtQuick.Layouts
 
 import qs.Objects.Design
 import qs.Objects.Widgets
+import qs.Objects.Theme
+import qs.Objects.Window.Settings
 
 
 
@@ -18,6 +21,26 @@ PanelWindow {
     TooltipWindow {
         id: tooltipWindow
     }
+
+    // ## Glass
+    // Blur is a property of the surface, not of the blocks, so the region is a
+    // union of the four block regions. Gaps between groups stay unblurred. Each
+    // block subtracts its own cut corners — see RoundedBlock.blurRegion.
+
+    WlrLayershell.namespace: "quickshell:bar"
+
+    property Region barBlurRegion: Region {
+        regions: [
+            leftModules.blurRegion,
+            appbar.blurRegion,
+            trayBlock.blurRegion,
+            rightModules.blurRegion
+        ]
+    }
+
+    BackgroundEffect.blurRegion:
+        (Theme.glass && Theme.blurMode === "protocol" && !mainWindow.gamingMode)
+            ? mainWindow.barBlurRegion : null
     anchors {
         top: true 
         left: true
@@ -94,16 +117,13 @@ PanelWindow {
         visible: mainWindow.gamingMode && mainWindow.gamingBarRevealed
         // Use alpha in color, NOT the opacity property — opacity cascades
         // into children and makes the clock/dot invisible
-        color: {
-            var c = root.settings.theme.surface
-            return Qt.rgba(c.r, c.g, c.b, 0.25)
-        }
+        color: Theme.alpha(Theme.scrimBase, 0.25)
 
         // Subtle clock
         Text {
             id: gamingClock
             anchors.centerIn: parent
-            color: root.settings.theme.text
+            color: root.theme.text
             font.family: root.settings.fontFamily
             font.weight: 600
             font.pixelSize: 11
@@ -130,7 +150,7 @@ PanelWindow {
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: gamingClock.right
             anchors.leftMargin: 6
-            color: root.settings.theme.primary
+            color: root.theme.primary
             opacity: 0.6
             visible: root.notifyServer
                 ? root.notifyServer.trackedNotifications.values.length > 0
@@ -195,6 +215,7 @@ PanelWindow {
             spacing: mainWindow.spacing
 
             SystemTray {
+                id: trayBlock
                 height: mainWindow.blockHeight
 
                 angular: true
@@ -213,26 +234,45 @@ PanelWindow {
                     anchors.centerIn: parent
                     spacing: 8
 
-                    ColorPickerWidget {}
-                    VolumeWidget {}
-                    DatetimeWidget { 
-                        format: root.settings.timeDateFormat
-                        textColor: '#7be376'
+                    ClockWidget {}
+
+                    DateWidget {}
+
+                    Rectangle {
+                        Layout.preferredWidth: 1
+                        Layout.preferredHeight: 18
+                        Layout.leftMargin: 4
+                        Layout.rightMargin: 4
+                        color: Theme.border
                     }
-                    InterfaceWidget {}
+
+                    VolumeWidget {}
+                    NetworkWidget {}
                     BluetoothWidget {}
                     IconButton{
                         id: settingsIconButton
                         iconName: "settings"
                         iconSize: 22
-                        color: root.settings.theme.primary
+                        color: root.theme.primary
                         tooltipText: "Open Settings"
                         onClicked: {
-                            settingsPopupWin.toggle(settingsIconButton) 
+                            quickSettingsPopup.toggle(settingsIconButton)
                         }
 
-                        SettingsManagementPopup{
-                            id: settingsPopupWin
+                        // The dense panel is still reachable from All Settings
+                        // until the granular settings window replaces it
+                        QuickSettingsPopup {
+                            id: quickSettingsPopup
+                            onOpenFullSettings: settingsWindow.open()
+                            onOpenPower: powerPopupWin.open()
+                        }
+
+                        PowerPopup {
+                            id: powerPopupWin
+                        }
+
+                        SettingsWindow {
+                            id: settingsWindow
                         }
                         
                     }

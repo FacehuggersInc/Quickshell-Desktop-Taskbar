@@ -1,5 +1,6 @@
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 import QtQuick
 import Quickshell.Widgets
 import QtQuick.Layouts
@@ -7,6 +8,7 @@ import QtQuick.Controls
 
 import qs.Objects.Design
 import qs.Objects.Widgets
+import qs.Objects.Theme
 
 PopupWindow {
     id: popup
@@ -17,6 +19,13 @@ PopupWindow {
     implicitHeight: display.implicitHeight > 0 ? display.implicitHeight : 80
     color: "transparent"
     visible: false
+
+    // Toasts had no mask, so the pass that added blur to every popup skipped
+    // this one. RoundedBlock exposes a region that follows its rounded corners.
+    mask: Region { item: display }
+
+    BackgroundEffect.blurRegion:
+        (Theme.glass && Theme.blurMode === "protocol") ? display.blurRegion : null
 
     // Accept the full notification object instead of loose strings
     property var notification: null

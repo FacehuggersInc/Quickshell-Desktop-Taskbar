@@ -28,13 +28,15 @@ A Hyprland desktop shell built with Quickshell.
 
 **Gaming Mode** — auto-triggered when a configured game app is detected. The bar hides completely; hovering near the top edge for 1 second reveals a minimal bar with a subtle clock and notification dot. Click to exit. A re-enter button appears on the app bar when paused. Configure per-app from the context menu or toggle manually from Settings.
 
-**Workspace Switcher** — shows all workspaces with window counts and active workspace highlighting.
+**Workspace Overview** — a fullscreen minimap of the desktop. Every monitor is drawn at its real aspect ratio with its windows at their true positions and live previews. Drag windows between monitors, click to focus, middle click to close. Bound to a keybind or opened from the bar.
+
+**Buckets** — hidden holding areas backed by special workspaces. Drop a window into empty space in the overview to stash it, double click a bucket to peek it onto the focused monitor, middle click to empty it there permanently.
 
 **Audio Management** — volume control, input/output device switching, media controls with album art and track metadata.
 
 **Bluetooth** — device pairing, connection management, scanning, and battery display.
 
-**Display Brightness** — per-display DDC brightness sliders with global sync option.
+**Display Brightness** — one DDC control for every display, cached and issued in parallel.
 
 **Theater Mode** — dims non-primary displays for focused viewing.
 
@@ -46,7 +48,15 @@ A Hyprland desktop shell built with Quickshell.
 
 **Wallpaper Cycling** — timed wallpaper rotation with day/night scheduling, per-display random selection, smart cropping for vertical monitors, and optional auto-theming from wallpaper colors.
 
-**Theme Engine** — full color theming from config or auto-generated from wallpaper. Includes a color picker with history.
+**Theme Engine** — one accent hue, optionally taken from the wallpaper and clamped so it always clears a contrast threshold. Translucent blurred surfaces, light and dark on a schedule.
+
+**Quick Settings** — an Android style drop down: brightness, wallpaper mode, theater and gaming toggles, quick actions, drives, session.
+
+**Settings Window** — a searchable tabbed window covering everything in `config.json`, built from a declarative schema so every page shares the same controls and spacing.
+
+**Dot Matrix Clock** — the time rendered as a lit dot grid, with a week strip date beside it.
+
+**Network Meter** — live upload and download throughput as a rolling dot histogram.
 
 **USB Quick Access** — auto-mount detection with one-click open-in-files.
 
@@ -177,7 +187,7 @@ exec-once = awww-daemon
 exec-once = quickshell
 ```
 
-> **`theme.py` must be present** in `~/.config/quickshell/Scripts/` alongside `utill.py`. It is included in the repo — if it is missing every `utill.py` call will crash and the shell will not function.
+> **`theme.py`** is now imported lazily, only by `--generatetheme`. Every other `utill.py` call runs without it. It is no longer on the shell's startup path.
 
 ---
 
@@ -236,7 +246,10 @@ The table below documents what the shell is actually doing in the background. Th
 | Function | What the shell uses it for |
 |---|---|
 | `--getcurrentplaying` | Polls MPRIS every 300ms when the audio popup is open — returns title, artist, album, art URL, source app and playback status |
-| `--getactiveapplications` | Polls every 650ms to build the app bar — returns all open windows with their class, PID, command, workspace, title and Hyprland window address. Each window is tracked individually by address so apps with multiple windows (e.g. browsers) show all of them in the context menu |
+| `--getcommands` | Called when the app bar sees a pid for the first time — reads `/proc/<pid>/cmdline` for just those pids instead of scanning the whole process table |
+| `--ddcstatus` | Reads brightness from every cached ddc display in parallel |
+| `--ddcsetall` | Sets brightness on every cached ddc display in parallel |
+| `--ddcrefresh` | Forces a ddc re-detect and rewrites `.ddc-cache` |
 | `--getappicons` | Called when an app class name has no cached icon — resolves the icon using a layered lookup: exact name match in icon theme directories and `/usr/share/pixmaps/`, Flatpak export paths, dotted/hyphenated name segmentation (e.g. `org.gnome.Nautilus` → `nautilus`), then fuzzy matching as a last resort (threshold 85). Results are cached in `.icon-path-cache`. The cache auto-invalidates when icon directories change (e.g. a new Flatpak is installed) |
 | `--setappicon` | Called when pinning an app from the installed apps list — resolves the `.desktop` file's `Icon` name to a full path using the same layered lookup as `--getappicons` and writes it to the cache |
 | `--getdesktopapps` | Called each time the "Add App" window opens — parses all `.desktop` files including Flatpak exports. Previously-pinned apps are filtered out using the current launcher list so recently unpinned apps appear immediately |
@@ -245,9 +258,6 @@ The table below documents what the shell is actually doing in the background. Th
 | `--getcommandhistory` | Called when the Command History popup opens — reads `~/.bash_history`, `~/.zsh_history` and `~/.local/share/fish/fish_history`. **Filters heavily** — strips sudo, package managers, git, file ops, shell builtins and any single-word command. The intent is app launches and custom scripts only. If a command you expect to see is missing it is almost certainly being filtered. Edit `FILTER_PREFIXES` in `utill.py` to loosen this. |
 | `--randomfile` | Called on each wallpaper cycle — picks one random file per display from the configured folder |
 | `--smartcrop` | Called before setting a wallpaper on a vertical monitor — analyses column variance to find the most visually interesting horizontal region and crops to it. Returns the original path unchanged if the image ratio is already close enough or if variance is too uniform |
-| `--getmonitorres` | Called once on startup — reads monitor dimensions and transform from `hyprctl monitors -j` to determine which displays are vertical |
-| `--ddcdetect` | Called when the settings panel opens — lists DDC-capable displays via `ddcutil detect` |
-| `--ddcgetbrightness` | Called when the settings panel opens — reads current brightness for each detected display |
 | `--ddcsetbrightness` | Called on slider release — sets brightness on a specific display number via `ddcutil setvcp 10` |
 | `--btstate` | Polls every 2s in the bluetooth widget — returns adapter power, scanning and discoverable state |
 | `--btdevices` | Polls when the bluetooth popup is open — lists paired devices with alias, connection status and battery percentage |
@@ -262,8 +272,6 @@ The table below documents what the shell is actually doing in the background. Th
 | `--getcolors` | Called when the color history popup opens |
 | `--clearcolors` | Called on the clear button in the color history popup |
 | `--usbmountcheck` | Called when a USB hotplug event fires — checks if the partition is mounted and mounts it via `udisksctl` if not |
-| `--generatetheme` | Called when `autoTheme` is enabled — builds a full color theme from seed colors extracted from the current wallpaper |
-| `--getdisplays` | Called once on startup — reads all monitors from `hyprctl monitors -j`, sorts left-to-right by x position, and auto-updates `settings.displays` if the connected monitors have changed |
 | `--ddcmapping` | Called once on startup — maps DDC display numbers to connector names so brightness commands target the correct physical monitor |
 
 **Python packages required** by this file:
@@ -354,12 +362,21 @@ If you have not yet created `config.json` see [Installation](#4-installation) ab
     "fontFamily":      "JetBrainsMono",          // required
     "dateTimeFormat":  "%I:%M%p %a, %b %d",      // strftime format for the clock widget
     "theme": {
-        "background": "#19090e",                 // required
-        "surface":    "#2b1e22",                 // required
-        "primary":    "#6b5d62",                 // required
-        "secondary":  "#55474c",
-        "text":       "#e7d9df"                  // required
+        "mode":          "auto",       // "auto" | "light" | "dark"
+        "accentSource":  "wallpaper",  // "wallpaper" | "fixed"
+        "accent":        "#6b5d62",
+        "glass":         true,
+        "blurMode":      "protocol",   // "protocol" | "compositor"
+        "panelDim":      1.0,
+        "overlayDim":    1.0,
+        "previews":      "still"       // "still" | "live" | "off"
     },
+    "widgets": {
+        "clockStyle":   "text",        // "text" | "dots"
+        "clock24":      false,
+        "networkStyle": "dots"         // "dots" | "text"
+    },
+    "buckets": [],                     // named special workspaces, created from the overview
 
     "colorHistory": [],
     "forceDarkMode":   false,
@@ -424,15 +441,38 @@ Any `{v-key}` that doesn't match a key in `variables` is left as-is.
 
 ## 8. Theme
 
-Theme colors are set manually in `config.json` under the `theme` key. If you want to generate a theme from seed colors, `utill.py` includes a `--generatetheme` function that builds a full theme from a set of hex colors:
+Theming is handled by the `Theme` singleton in `Objects/Theme/Theme.qml`. The
+`theme` block in `config.json` holds only authored values:
 
-```bash
-python3 ~/.config/quickshell/Scripts/utill.py --generatetheme dark #19090e #6b5d62
+```json
+"theme": {
+    "mode":          "auto",        // "auto" | "dark" | "light"
+    "glass":         true,
+    "scrimStrength": 1.0,
+    "accentSource":  "wallpaper",   // "wallpaper" | "fixed"
+    "accent":        "#6b5d62"
+}
 ```
 
-**Auto theming** — setting `"autoTheme": true` in `wallpapers` enables automatic theme generation. Every time the wallpaper changes, colors are sampled from it and the theme is updated and saved to `config.json` automatically.
+Everything else — surfaces, borders, text emphasis levels, accent states — is
+derived at runtime and never written back to `config.json`.
 
-> **`autoTheme` requires `wallpapers.cycling` to also be `true`.** The theme is generated as a side effect of a wallpaper being set — if cycling is disabled, no wallpaper is ever applied by the shell and `autoTheme` will never fire. The initial theme on startup also depends on cycling running at least once to sample colors. If you want a fixed theme, set `autoTheme: false` and define your colors manually in `config.json` — this works regardless of whether cycling is on or off.
+A single accent hue is taken from the wallpaper, clamped into a fixed saturation
+and lightness band, then contrast-checked against the worst case backdrop so
+icons and text stay readable whatever the wallpaper does. Text itself is never
+tinted with the accent.
+
+Surfaces are translucent and blurred by the compositor via
+`ext-background-effect-v1`. Set `"glass": false` for opaque surfaces, or use
+Hyprland layer rules against the `quickshell:bar` namespace if the protocol is
+unavailable.
+
+Light and dark follow `forceDarkMode`, then `wallpapers.wallpaperMode`, then
+`wallpapers.darkModeHours`, on an independent timer — this no longer requires
+`wallpapers.cycling` to be enabled.
+
+See `Docs/THEME.md` for the full token list, the contrast rules, and the
+compositor fallback.
 
 ---
 
@@ -608,25 +648,34 @@ When `path` is empty (default), the shell auto-resolves to `./Scripts/utill.py` 
 
 ## 14. Timers & Reactivity
 
-Most polling uses `Timer` components with fixed intervals. These control how quickly the UI reacts to changes — lower means faster updates but more subprocess calls. **If the default intervals feel too slow or too aggressive for your system, change them directly in the file listed.**
+Most of the shell is event driven now. Hyprland state comes from the event
+socket, brightness is read once at startup, and throughput is differenced from
+`/proc/net/dev` in QML. What is left:
 
-| Feature | Default | File | What it polls |
+| Feature | Default | File | What it does |
 |---|---|---|---|
-| Wallpaper switching | set via config (`interval` key in ms) | `shell.qml` | Cycles to the next wallpaper — controlled by `setWallpaperInterval()` |
-| USB hotplug retry | 1500ms | `shell.qml` | Delay before retrying a USB mount check after a hotplug event |
-| Active applications (initial) | 10ms | `Objects/Widgets/AppBarWidget.qml` | Fires immediately on startup to build the static app list, then slows down |
-| Active applications (polling) | 650ms | `Objects/Widgets/AppBarWidget.qml` | Running windows, active state, instance counts |
-| Media metadata | 1000ms | `Objects/Systems/MediaSystem.qml` | Currently playing track, artist, album, status — always polling |
-| Media display refresh | 300ms | `Objects/Window/AudioManagementPopup.qml` | Updates the now-playing display in the audio popup (only while popup is open) |
-| Notification popup auto-dismiss | 6000ms | `Objects/Window/NotificationPopup.qml` | Auto-closes toast after this time |
-| Notifications badge | 500ms | `Objects/Widgets/NotificationsWidget.qml` | Unread count fallback |
-| Workspace list | 2000ms | `Objects/Widgets/WorkspaceSwitcherWidget.qml` | All workspaces and window counts |
-| Active workspace | 200ms | `Objects/Widgets/WorkspaceSwitcherWidget.qml` | Current workspace highlight |
-| Network info | 1500ms | `Objects/Window/NetworkPopup.qml` | Interface, VPN, upload/download (only while popup is open) |
-| Bluetooth device list | 3000ms | `Objects/Window/BluetoothPopup.qml` | Paired devices and connection state |
-| Bluetooth scan timeout | 12000ms | `Objects/Window/BluetoothPopup.qml` | Stops scanning after this duration |
-| USB drives in settings | 3000ms | `Objects/Window/SettingsManagementPopup.qml` | Mounted USB devices (only while popup is open) |
-| Brightness debounce | 350ms | `Objects/Window/SettingsManagementPopup.qml` | Delay before sending DDC command after slider release |
+| Hyprland event debounce | 60ms | `Objects/Systems/HyprlandSystem.qml` | Coalesces socket events before refreshing — not a poll |
+| Network throughput | 1000ms | `Objects/Widgets/NetworkWidget.qml` | Differences `/proc/net/dev`, no subprocess |
+| Network identity | 15s | `Objects/Widgets/NetworkWidget.qml` | Interface name and VPN state |
+| Clock | 1000ms | `Objects/Widgets/ClockWidget.qml` | Reads the system clock, no subprocess |
+| Date | 60s | `Objects/Widgets/DateWidget.qml` | Reads the system clock, no subprocess |
+| Media metadata | 1000ms | `Objects/Systems/MediaSystem.qml` | Currently playing track |
+| Media display refresh | 300ms | `Objects/Window/AudioManagementPopup.qml` | Only while the popup is open |
+| Notification toast | 6000ms | `Objects/Window/NotificationPopup.qml` | Auto dismiss |
+| Bluetooth devices | 3000ms | `Objects/Window/BluetoothPopup.qml` | Only while the popup is open |
+| USB drives | 4000ms | `Objects/Window/QuickSettingsPopup.qml` | Only while the panel is open |
+| Brightness write throttle | 220ms | `Objects/Systems/BrightnessSystem.qml` | Rate limits ddc writes while dragging |
+
+### What used to poll
+
+| Was | Cost | Now |
+|---|---|---|
+| App bar windows, 650ms | python + full `ps` scan + `hyprctl clients` | Hyprland event socket |
+| Active workspace, 200ms | python + `hyprctl` | Hyprland event socket |
+| Workspace list, 2000ms | python + `hyprctl` | Hyprland event socket |
+| Network info, 1500ms | python, and each call slept 500ms to take a second sample | `/proc/net/dev` read in QML |
+| Clock, 1000ms | python, purely to format a date string | Qt |
+| Brightness, on every panel open | `ddcutil detect` plus a serial `getvcp` per display | Cached list, parallel reads, once at startup |
 
 ---
 

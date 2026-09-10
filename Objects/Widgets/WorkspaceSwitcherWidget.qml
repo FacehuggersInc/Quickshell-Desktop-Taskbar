@@ -1,174 +1,141 @@
 import Quickshell
-import Quickshell.Io
 import QtQuick
-import Quickshell.Widgets
 import QtQuick.Layouts
-import QtQuick.Controls
-import Quickshell.Hyprland
 
 import qs.Objects.Design
-import qs.Objects.Window
-import qs.Objects.Widgets
+import qs.Objects.Theme
+import qs.Objects.Systems
 
 Item {
     id: workspaceSwitcher
     implicitWidth: row.implicitWidth
     implicitHeight: row.implicitHeight
 
-    property int activeWorkspace: 1
-    property var workspaceData: []  // [{id, windowCount}]
+    // ## Monitor summary
+    // One cell per monitor at that monitor's aspect ratio, holding a miniature
+    // of its window layout and the window count. Screen capture is deliberately
+    // not used here — three live output feeds behind a 20px cell is a lot of
+    // GPU for something this small, and a capture of the output would contain
+    // the bar itself.
 
-    // ── Fetch workspace + window data ─────────────────────────────
-    Process {
-        id: workspaceProc
-        command: root.cmd("hypr_list_workspaces")
-        stdout: StdioCollector {
-            onStreamFinished: {
-                try {
-                    var data = JSON.parse(this.text.trim())
-                    var ws = []
-                    for (var i = 0; i < data.length; i++) {
-                        var w = data[i]
-                        // Skip special workspaces
-                        if (w.id < 1) continue
-                        ws.push({ id: w.id, windowCount: w.windows || 0 })
-                    }
-                    // Sort by id
-                    ws.sort(function(a, b) { return a.id - b.id })
-                    workspaceSwitcher.workspaceData = ws
-                } catch(e) {}
-            }
-        }
-    }
+    property int cellHeight: 20
 
-    Process {
-        id: activeProc
-        command: root.cmd("hypr_active_workspace")
-        stdout: StdioCollector {
-            onStreamFinished: {
-                try {
-                    var data = JSON.parse(this.text.trim())
-                    workspaceSwitcher.activeWorkspace = data.id || 1
-                } catch(e) {}
-            }
-        }
-    }
-
-    // Workspace list refreshes every 2s (windows change less often)
-    Timer {
-        interval: 2000
-        repeat: true
-        running: true
-        triggeredOnStart: true
-        onTriggered: {
-            if (!workspaceProc.running) workspaceProc.running = true
-        }
-    }
-
-    // Active workspace polls every 200ms for snappy switching feel
-    Timer {
-        interval: 200
-        repeat: true
-        running: true
-        triggeredOnStart: true
-        onTriggered: {
-            if (!activeProc.running) activeProc.running = true
-        }
-    }
-
-    function switchTo(id) {
-        root.execute(root.cmd("hypr_switch_workspace", {"id": String(id)}))
-    }
-
-    function createWorkspace() {
-        var ids = workspaceData.map(function(w) { return w.id })
-        var next = 1
-        while (ids.indexOf(next) !== -1) next++
-        root.execute(root.cmd("hypr_switch_workspace", {"id": String(next)}))
-    }
-
-    // ── Dot pager ─────────────────────────────────────────────────
     RowLayout {
         id: row
         spacing: 6
 
         Repeater {
-            model: workspaceSwitcher.workspaceData
-            delegate: Item {
+            model: HyprlandSystem.monitors
+
+            delegate: Rectangle {
+                id: cell
                 required property var modelData
-                required property int index
 
-                property bool isActive: modelData.id === workspaceSwitcher.activeWorkspace
-                property int winCount: modelData.windowCount
+                readonly property var windows:
+                    HyprlandSystem.windowsOnWorkspace(modelData.activeWorkspaceId)
+                readonly property real aspect:
+                    modelData.h > 0 ? (modelData.w / modelData.h) : 1.6
+                readonly property real scaleFactor:
+                    modelData.w > 0 ? (width / modelData.w) : 1
 
-                // Width grows with window count, height stays fixed
-                width:  Math.min(10 + winCount * 6, 32)
-                height: 10
+                implicitHeight: workspaceSwitcher.cellHeight
+                implicitWidth: Math.max(24, Math.round(workspaceSwitcher.cellHeight * aspect))
 
-                Behavior on width { NumberAnimation { duration: 150; easing.type: Easing.InOutQuad } }
+                radius: 4
+                // Recessed rather than raised — a light fill over a dark bar is
+                // how these ended up reading as grey blocks
+                color: modelData.focused ? Theme.alpha(Theme.accent, 0.18)
+                                         : Theme.alpha(Theme.scrimBase, 0.40)
+                border.width: 1
+                border.color: modelData.focused ? Theme.accentLine
+                                                : Theme.alpha(Theme.textBase, 0.10)
+                clip: true
 
-                Rectangle {
-                    anchors.fill: parent
-                    radius: height / 2
-                    color: isActive
-                        ? root.settings.theme.primary
-                        : winCount > 0
-                            ? root.settings.theme.text
-                            : root.settings.theme.text
-                    opacity: isActive ? 1.0 : winCount > 0 ? 0.55 : 0.2
+                Behavior on color { ColorAnimation { duration: Theme.durFast } }
 
-                    Behavior on opacity { NumberAnimation { duration: 100 } }
-                    Behavior on color   { ColorAnimation  { duration: 100 } }
+                Repeater {
+                    model: cell.windows
 
-                    // Bright outline on active workspace for extra visibility
-                    Rectangle {
-                        visible: isActive
-                        anchors.fill: parent
-                        anchors.margins: -2
-                        radius: parent.radius + 2
-                        color: "transparent"
-                        border.color: root.settings.theme.primary
-                        border.width: 1.5
-                        opacity: 0.5
+                    delegate: Rectangle {
+                        required property var modelData
+
+                        x: Math.round((modelData.x - cell.modelData.x) * cell.scaleFactor)
+                        y: Math.round((modelData.y - cell.modelData.y) * cell.scaleFactor)
+                        width: Math.max(2, Math.round(modelData.w * cell.scaleFactor))
+                        height: Math.max(2, Math.round(modelData.h * cell.scaleFactor))
+
+                        radius: 1
+                        color: modelData.activated
+                            ? Theme.alpha(Theme.accent, 0.85)
+                            : Theme.alpha(Theme.textBase, 0.16)
+
+                        Behavior on x { NumberAnimation { duration: Theme.durNormal } }
+                        Behavior on y { NumberAnimation { duration: Theme.durNormal } }
+                        Behavior on width { NumberAnimation { duration: Theme.durNormal } }
+                        Behavior on height { NumberAnimation { duration: Theme.durNormal } }
                     }
                 }
 
-                HoverHandler { id: dotHov; cursorShape: Qt.PointingHandCursor }
+                Text {
+                    anchors.centerIn: parent
+                    text: cell.windows.length
+                    color: cell.modelData.focused ? Theme.accentText : Theme.text
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 10
+                    font.weight: 700
+                    style: Text.Outline
+                    styleColor: Theme.alpha(Theme.scrimBase, 0.85)
+                }
 
                 Tooltip {
-                    id: dotTooltip
-                    text: "Workspace " + modelData.id
-                        + (winCount > 0 ? "  (" + winCount + " windows)" : "")
+                    id: cellTooltip
+                    text: cell.modelData.name + "  ·  workspace " + cell.modelData.activeWorkspaceId
+                        + "  ·  " + cell.windows.length + " windows"
                 }
 
-                MouseArea {
-                    anchors.fill: parent
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    onClicked: (mouse) => {
-                        if (mouse.button === Qt.LeftButton) {
-                            workspaceSwitcher.switchTo(modelData.id)
-                        } else {
-                            workspaceSendPopup.targetWorkspaceId = modelData.id
-                            workspaceSendPopup.toggle(workspaceSwitcher)
-                        }
-                    }
-                    HoverHandler {
-                        onHoveredChanged: {
-                            if (hovered) dotTooltip.showAt(point)
-                            else dotTooltip.hide()
-                        }
+                HoverHandler {
+                    onHoveredChanged: {
+                        if (hovered) cellTooltip.showAt(point)
+                        else cellTooltip.hide()
                     }
                 }
             }
         }
 
-        // Add workspace button
-        IconButton{
-            id: addWsBtn
-            iconName: "add"
-            iconSize: 16
+        // Bucket indicator — only present when something is stashed
+        Rectangle {
+            readonly property int stashed: {
+                var total = 0
+                var special = HyprlandSystem.specialWorkspaces()
+                for (var i = 0; i < special.length; i++) {
+                    total += HyprlandSystem.windowsOnSpecial(
+                        special[i].name.replace("special:", "")).length
+                }
+                return total
+            }
 
-            onClicked: workspaceSwitcher.createWorkspace()
+            visible: stashed > 0
+            implicitHeight: workspaceSwitcher.cellHeight
+            implicitWidth: 18
+            radius: 4
+            color: Theme.alpha(Theme.scrimBase, 0.40)
+            border.width: 1
+            border.color: Theme.alpha(Theme.textBase, 0.10)
+
+            Text {
+                anchors.centerIn: parent
+                text: parent.stashed
+                color: Theme.textDim
+                font.family: Theme.fontFamily
+                font.pixelSize: 10
+                font.weight: 700
+            }
         }
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        cursorShape: Qt.PointingHandCursor
+        onClicked: root.overview.toggle()
     }
 }
