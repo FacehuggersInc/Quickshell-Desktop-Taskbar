@@ -53,8 +53,6 @@ PopupPanel {
 
     content: ColumnLayout {
         id: body
-        anchors.left: parent.left
-        anchors.right: parent.right
         spacing: 8
 
         RowLayout {

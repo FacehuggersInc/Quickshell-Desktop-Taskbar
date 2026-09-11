@@ -9,6 +9,7 @@ import QtQuick.Window
 import Quickshell.Hyprland
 
 import qs.Objects.Design
+import qs.Objects.Design.Controls
 import qs.Objects.Widgets
 import qs.Objects.Theme
 
@@ -87,7 +88,7 @@ PopupWindow {
         x: notificationsPanel.implicitWidth
         y: 0
         radius: 12
-        color: root.theme.background
+        color: Theme.panelScrim
         sidePadding: 0
         tbPadding: 0
         clip: true
@@ -108,63 +109,46 @@ PopupWindow {
 
                 Text {
                     text: "Notifications"
-                    color: root.theme.text
-                    font.family: root.settings.fontFamily
+                    color: Theme.text
+                    font.family: Theme.fontFamily
                     font.weight: 700
-                    font.pixelSize: 20
+                    font.pixelSize: 17
                     Layout.fillWidth: true
                 }
 
                 Rectangle {
                     visible: root.notifyServer.trackedNotifications.values.length > 0
                     width: countText.implicitWidth + 16
-                    height: 24
-                    radius: 12
-                    color: root.theme.primary
-                    opacity: 0.8
+                    height: 22
+                    radius: 11
+                    color: Theme.alpha(Theme.accent, 0.85)
 
                     Text {
                         id: countText
                         anchors.centerIn: parent
                         text: root.notifyServer.trackedNotifications.values.length
-                        color: root.theme.text
-                        font.family: root.settings.fontFamily
+                        color: Theme.onAccent
+                        font.family: Theme.fontFamily
                         font.weight: 700
-                        font.pixelSize: 13
+                        font.pixelSize: 12
                     }
                 }
 
-                RoundButton {
+                ActionButton {
                     visible: root.notifyServer.trackedNotifications.values.length > 0
-                    text: "Clear all"
-                    font.family: root.settings.fontFamily
-                    font.pixelSize: 13
-                    padding: 5
-                    horizontalPadding: 10
-                    contentItem: Text {
-                        text: parent.text
-                        font: parent.font
-                        color: root.theme.text
-                        horizontalAlignment: Text.AlignHCenter
-                    }
-                    background: Rectangle {
-                        radius: 6
-                        color: "#e05555"
-                        opacity: 0.7
-                    }
-                    HoverHandler { cursorShape: Qt.PointingHandCursor }
-                    onClicked: {
+                    label: "Clear all"
+                    tone: "danger"
+                    onActivated: {
                         var notifs = root.notifyServer.trackedNotifications.values
-                        for (var i = notifs.length - 1; i >= 0; i--) {
+                        for (var i = notifs.length - 1; i >= 0; i--)
                             notifs[i].dismiss()
-                        }
                     }
                 }
 
                 IconButton {
                     iconName: "close"
-                    iconSize: 20
-                    color: root.theme.text
+                    iconSize: 18
+                    color: Theme.text
                     tooltipText: "Close"
                     onClicked: notificationsPanel.close()
                 }
@@ -175,9 +159,8 @@ PopupWindow {
                 Layout.fillWidth: true
                 Layout.leftMargin: 16
                 Layout.rightMargin: 16
-                height: 1
-                color: root.theme.text
-                opacity: 0.1
+                height: Theme.borderWidth
+                color: Theme.border
             }
 
             // ── Notification list ─────────────────────────────────
@@ -203,10 +186,9 @@ PopupWindow {
                     Text {
                         visible: root.notifyServer.trackedNotifications.values.length === 0
                         text: "No notifications"
-                        color: root.theme.text
-                        opacity: 0.4
-                        font.family: root.settings.fontFamily
-                        font.pixelSize: 16
+                        color: Theme.textMute
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.valueSize
                         Layout.alignment: Qt.AlignHCenter
                         Layout.topMargin: 24
                     }
@@ -215,7 +197,12 @@ PopupWindow {
                         model: root.notifyServer.trackedNotifications
                         delegate: Notification {
                             required property var modelData
+
+                            // Explicit width — letting the layout infer it from
+                            // content is what pushed long summaries past the edge
                             Layout.fillWidth: true
+                            Layout.preferredWidth: notifColumn.width
+                            Layout.maximumWidth: notifColumn.width
                             notification: modelData
                         }
                     }
