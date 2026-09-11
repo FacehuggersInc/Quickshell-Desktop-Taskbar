@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Controls
 
 import qs.Objects.Design
+import qs.Objects.Theme
 import qs.Objects.Widgets
 import qs.Objects.Window
 
@@ -33,9 +34,9 @@ PopupPanel {
 
             Text {
                 text: "Masque under:"
-                color: root.theme.text
+                color: Theme.text
                 opacity: 0.55
-                font.family: root.settings.fontFamily
+                font.family: Theme.fontFamily
                 font.pixelSize: 12
                 font.weight: 600
                 Layout.fillWidth: true
@@ -44,7 +45,7 @@ PopupPanel {
             IconButton {
                 iconName: "close"
                 iconSize: 14
-                color: root.theme.text
+                color: Theme.text
                 tooltipText: "Cancel"
                 onClicked: masquePopup.forceClose()
             }
@@ -76,16 +77,16 @@ PopupPanel {
                         text: modelData.nickname !== modelData.name
                             ? modelData.nickname + "  (" + modelData.name + ")"
                             : modelData.name
-                        font.family: root.settings.fontFamily
+                        font.family: Theme.fontFamily
                         font.pixelSize: 13
                         font.weight: 500
-                        color: root.theme.text
+                        color: Theme.text
                         Layout.fillWidth: true
                     }
                 }
                 background: Rectangle {
                     radius: 6
-                    color: masqueHov.hovered ? root.theme.primary : "transparent"
+                    color: masqueHov.hovered ? Theme.accent : "transparent"
                     opacity: masqueHov.hovered ? 0.18 : 1
                 }
                 HoverHandler { id: masqueHov; cursorShape: Qt.PointingHandCursor }

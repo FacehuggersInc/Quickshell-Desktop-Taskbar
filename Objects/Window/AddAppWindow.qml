@@ -1,25 +1,50 @@
 import QtQuick
-import QtQuick.Window
 import QtQuick.Layouts
 import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
+import Quickshell.Wayland
 
 import qs.Objects.Design
+import qs.Objects.Theme
+import qs.Objects.Systems
 import qs.Objects.Widgets
 
 // Shared base — opened by AppBar's add button
 // mode: "existing" or "custom"
-Window {
+PanelWindow {
     id: addAppWindow
-    title: mode === "existing" ? "Add App — Choose Application" : "Add App — Custom"
-    width: 600
-    height: mode === "existing" ? 500 : 680
-    minimumWidth: 500
-    minimumHeight: 300
-    color: root.theme.background
 
-    flags: Qt.Window | Qt.WindowTitleHint | Qt.WindowCloseButtonHint
+    visible: false
+    color: "transparent"
+
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.namespace: "quickshell:addapp"
+    WlrLayershell.keyboardFocus: addAppWindow.visible ? WlrKeyboardFocus.Exclusive
+                                                      : WlrKeyboardFocus.None
+
+    anchors {
+        top: true
+        bottom: true
+        left: true
+        right: true
+    }
+    exclusiveZone: 0
+
+    screen: {
+        var target = HyprlandSystem.focusedMonitor
+        var list = Quickshell.screens
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].name === target)
+                return list[i]
+        }
+        return list.length > 0 ? list[0] : null
+    }
+
+    property Region glassBlurRegion: Region { item: card }
+    BackgroundEffect.blurRegion:
+        (addAppWindow.visible && Theme.glass && Theme.blurMode === "protocol")
+            ? glassBlurRegion : null
 
     property string mode: "existing"   // "existing" or "custom"
 
@@ -49,13 +74,69 @@ Window {
         }
     }
 
-    function openExisting() { mode = "existing"; visible = true; existingView.refresh() }
-    function openCustom()   { mode = "custom";   visible = true; customView.reset() }
+    function openExisting() {
+        mode = "existing"
+        visible = true
+        existingView.refresh()
+        keyHandler.forceActiveFocus()
+    }
+
+    function openCustom() {
+        mode = "custom"
+        visible = true
+        customView.reset()
+        keyHandler.forceActiveFocus()
+    }
+
+    function close() { addAppWindow.visible = false }
+
+    Item {
+        id: keyHandler
+        anchors.fill: parent
+        focus: addAppWindow.visible
+        Keys.onEscapePressed: addAppWindow.close()
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: Theme.overlayScrim
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: addAppWindow.close()
+        }
+    }
+
+    Rectangle {
+        id: card
+
+        // Swallows clicks so empty space inside the card does not reach the
+        // dismiss area behind it
+        MouseArea {
+            anchors.fill: parent
+            z: -1
+            acceptedButtons: Qt.AllButtons
+            onClicked: {}
+            onPressed: {}
+        }
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 140,
+                        addAppWindow.mode === "existing" ? 680 : 760)
+        // The custom form is a long column of fields; at 700 it was scrolling
+        // in a stub of a window with every control squeezed
+        height: addAppWindow.mode === "existing"
+            ? Math.min(parent.height - 140, 620)
+            : Math.min(parent.height - 80, 900)
+        radius: Theme.radius
+        color: Theme.panelScrim
+        border.width: Theme.borderWidth
+        border.color: Theme.borderStrong
+        clip: true
 
     // ── Shared header ─────────────────────────────────────────────
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 16
+        anchors.margins: 18
         spacing: 12
 
         Text {
@@ -92,6 +173,8 @@ Window {
                 )
             }
         }
+    }
+
     }
 
     function saveApp(name, command, icon, className, options, lockOptions, ignoreOptions, masqueUnder) {
@@ -145,6 +228,6 @@ Window {
             writeIconCacheProc.running   = true
         }
 
-        addAppWindow.visible = false
+        addAppWindow.close()
     }
 }

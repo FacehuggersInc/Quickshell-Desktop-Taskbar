@@ -17,7 +17,7 @@ PopupWindow {
 
     anchor.window: mainWindow
     anchor.rect.x: Screen.width
-    anchor.rect.y: mainWindow.height + 5
+    anchor.rect.y: mainWindow.popupOffset(implicitHeight)
 
     // Width is fixed; height fits content up to screen height
     implicitWidth: 400

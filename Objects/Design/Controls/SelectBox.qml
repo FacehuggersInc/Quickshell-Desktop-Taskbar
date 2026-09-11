@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls.Basic
 
 import qs.Objects.Theme
 
@@ -8,24 +9,23 @@ Item {
     // [{ label, value }]
     property var options: []
     property var value: null
-    property bool enabled: true
     property string placeholder: "Select"
     signal picked(var value)
 
     readonly property string label: {
-        for (var i = 0; i < options.length; i++) {
-            if (options[i].value === control.value)
-                return options[i].label
+        var list = control.options ? control.options : []
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].value === control.value)
+                return list[i].label
         }
         return placeholder
     }
 
-    property bool open: false
+    property alias open: menu.visible
 
     implicitWidth: Theme.controlMinWidth + 40
     implicitHeight: Theme.controlHeight
     opacity: enabled ? 1.0 : 0.4
-    z: open ? 50 : 0
 
     Rectangle {
         id: face
@@ -62,64 +62,78 @@ Item {
 
         MouseArea {
             anchors.fill: parent
-            enabled: control.enabled
-            cursorShape: Qt.PointingHandCursor
-            onClicked: control.open = !control.open
+                        cursorShape: Qt.PointingHandCursor
+            onClicked: menu.visible ? menu.close() : menu.open()
         }
     }
 
-    Rectangle {
+    // ## Menu
+    // A Popup rather than a sibling Rectangle. Raising z only reorders against
+    // siblings, so an inline menu was painted over by the rows below it and read
+    // as transparent. A Popup lives in the window's overlay, above everything,
+    // and is never clipped by a ScrollView.
+
+    Popup {
         id: menu
-        visible: control.open
-        width: parent.width
-        y: parent.height + 4
-        height: Math.min(list.implicitHeight + 8, 190)
-        radius: Theme.radiusSmall
-        color: Theme.panelScrim
-        border.width: Theme.borderWidth
-        border.color: Theme.borderStrong
-        clip: true
 
-        Column {
+        y: control.height + 4
+        width: control.width
+        implicitHeight: Math.min(list.contentHeight + 8, 220)
+        padding: 4
+        modal: false
+        dim: false
+        closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
+
+        background: Rectangle {
+            radius: Theme.radiusSmall
+            color: Theme.menuSurface
+            border.width: Theme.borderWidth
+            border.color: Theme.borderStrong
+        }
+
+        contentItem: ListView {
             id: list
-            width: parent.width
-            y: 4
+            clip: true
+            implicitHeight: contentHeight
+            model: control.options ? control.options : []
+            boundsBehavior: Flickable.StopAtBounds
 
-            Repeater {
-                model: control.options
+            ScrollBar.vertical: ScrollBar {
+                policy: list.contentHeight > list.height
+                    ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+            }
 
-                delegate: Rectangle {
-                    required property var modelData
+            delegate: Rectangle {
+                required property var modelData
 
-                    width: menu.width
-                    height: 26
-                    color: rowArea.containsMouse ? Theme.alpha(Theme.accent, 0.18)
-                                                 : "transparent"
+                width: list.width
+                height: 26
+                color: rowArea.containsMouse ? Theme.alpha(Theme.accent, 0.20)
+                                             : "transparent"
 
-                    Text {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 10
-                        anchors.right: parent.right
-                        anchors.rightMargin: 10
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.label
-                        elide: Text.ElideRight
-                        color: modelData.value === control.value ? Theme.accentText : Theme.textDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.valueSize
-                        font.weight: modelData.value === control.value ? 700 : 500
-                    }
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData.label
+                    elide: Text.ElideRight
+                    color: modelData.value === control.value ? Theme.accentText : Theme.textDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.valueSize
+                    font.weight: modelData.value === control.value ? 700 : 500
+                }
 
-                    MouseArea {
-                        id: rowArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            control.value = modelData.value
-                            control.open = false
-                            control.picked(modelData.value)
-                        }
+                MouseArea {
+                    id: rowArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        control.value = modelData.value
+                        menu.close()
+                        control.picked(modelData.value)
                     }
                 }
             }

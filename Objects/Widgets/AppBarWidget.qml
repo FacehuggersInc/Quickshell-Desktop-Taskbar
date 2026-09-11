@@ -11,6 +11,7 @@ import qs.Objects.Window
 import qs.Objects.Design
 import qs.Objects.Widgets
 import qs.Objects.Systems
+import qs.Objects.Theme
 
 RoundedBlock{
     id: appBarWidget
@@ -1097,7 +1098,16 @@ RoundedBlock{
         function onChanged() { appBarWidget.syncFromHyprland() }
     }
 
-    Component.onCompleted: syncFromHyprland()
+    Component.onCompleted: {
+        syncFromHyprland()
+        root.addAppWindow = addAppWindow
+
+        // The bar wide right click lives in MainWindow, since this widget is
+        // only as wide as its icons
+        root.barMenu = addDropdown
+        root.appBar = appBarWidget
+        root.claimRightClick(appBarWidget)
+    }
 
     Process{
         id: getAppIconsProc
@@ -1317,8 +1327,8 @@ RoundedBlock{
     AppBarAddDropdown {
         id: addDropdown
         appWindow: addAppWindow
-        onRunRequested:     runPopup.forceOpen(addAppButton)
-        onHistoryRequested: historyPopup.forceOpen(addAppButton)
+        onRunRequested:     runPopup.forceOpen(appBarWidget)
+        onHistoryRequested: historyPopup.forceOpen(appBarWidget)
     }
 
     // -- MASQUE SELECTOR POPUP
@@ -1572,23 +1582,73 @@ RoundedBlock{
                             ? root.iconSource("open_app")
                             : iconSource
                         anchors.centerIn: parent
-                        width: parent.width * 1.5
-                        height: parent.height * 1.5
+                        width: parent.width * 1.3
+                        height: parent.height * 1.3
                         fillMode: Image.PreserveAspectFit
                         opacity: hiddenCount > 0 ? 0.4 : 1.0
                     }
-                    Rectangle {
-                        width: parent.width - 2
-                        height: 4
-                        radius: 2
+
+                    // ## Instance dots
+                    // One dot per open window, overlaid on the icon rather than
+                    // hanging below it, so the count reads at a glance. Beyond
+                    // four it falls back to a single dot with a number.
+
+                    Row {
                         anchors.bottom: parent.bottom
                         anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.bottomMargin: -12
+                        anchors.bottomMargin: -8
+                        spacing: 3
+                        visible: instanceCount > 0 && instanceCount <= 4
+
+                        Repeater {
+                            model: Math.min(instanceCount, 4)
+
+                            delegate: Rectangle {
+                                width: 6
+                                height: 6
+                                radius: 3
+                                color: {
+                                    if (hiddenCount === instanceCount) return Theme.textMute
+                                    if (hiddenCount > 0) return Theme.warn
+                                    return Theme.accent
+                                }
+
+                                Rectangle {
+                                    anchors.centerIn: parent
+                                    width: parent.width + 3
+                                    height: parent.height + 3
+                                    radius: width / 2
+                                    color: Qt.rgba(0, 0, 0, 0.6)
+                                    z: -1
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottomMargin: -8
+                        visible: instanceCount > 4
+                        width: countText.implicitWidth + 10
+                        height: 14
+                        radius: 7
                         color: {
-                            if (instanceCount === 0) return "transparent"
-                            if (hiddenCount === instanceCount) return "#666666"
-                            if (hiddenCount > 0) return "#ffaa00"
-                            return root.theme.primary
+                            if (hiddenCount === instanceCount) return Theme.textMute
+                            if (hiddenCount > 0) return Theme.warn
+                            return Theme.accent
+                        }
+                        border.width: 1
+                        border.color: Qt.rgba(0, 0, 0, 0.55)
+
+                        Text {
+                            id: countText
+                            anchors.centerIn: parent
+                            text: instanceCount
+                            color: Theme.onAccent
+                            font.family: Theme.fontFamily
+                            font.pixelSize: 9
+                            font.weight: 700
                         }
                     }
                 }
@@ -1633,14 +1693,6 @@ RoundedBlock{
             }
         }
 
-        // ── Add App button — always at the end ─────────────────── 
-        IconButton {
-            id: addAppButton
-            iconName: "apps"
-            iconSize: 26
-            tooltipText: "Add App"
-            color: root.theme.text
-            onClicked: addDropdown.toggle(addAppButton)
-        }
     }
+
 }

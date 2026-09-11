@@ -90,7 +90,27 @@ QtObject {
                 vertical: h > w,
                 focused: m.focused === true,
                 activeWorkspaceId: m.activeWorkspace ? m.activeWorkspace.id : -1,
-                activeWorkspaceName: m.activeWorkspace ? m.activeWorkspace.name : ""
+                activeWorkspaceName: m.activeWorkspace ? m.activeWorkspace.name : "",
+
+                // A peeked bucket sits on top of the real workspace rather than
+                // replacing it, and nothing else reports that it is showing
+                specialWorkspace: (raw.specialWorkspace && raw.specialWorkspace.name)
+                    ? raw.specialWorkspace.name.replace("special:", "") : "",
+
+                // ## Hardware
+                // Everything the display editor needs. availableModes is a list
+                // of "1920x1080@144.00Hz" strings straight from Hyprland.
+                description: raw.description || "",
+                make: raw.make || "",
+                model: raw.model || "",
+                serial: raw.serial || "",
+                refresh: raw.refreshRate ? Math.round(raw.refreshRate * 100) / 100 : 0,
+                nativeWidth: raw.width || 0,
+                nativeHeight: raw.height || 0,
+                availableModes: raw.availableModes || [],
+                disabled: raw.disabled === true,
+                dpmsStatus: raw.dpmsStatus !== false,
+                vrr: raw.vrr === true
             })
         }
         mons.sort(function(a, b) { return a.x - b.x })
@@ -223,6 +243,23 @@ QtObject {
         return out
     }
 
+    // Which monitor a bucket is currently overlaid on, if any
+    function monitorShowing(bucket) {
+        for (var i = 0; i < monitors.length; i++) {
+            if (monitors[i].specialWorkspace === bucket)
+                return monitors[i].name
+        }
+        return ""
+    }
+
+    function anySpecialShowing() {
+        for (var i = 0; i < monitors.length; i++) {
+            if (monitors[i].specialWorkspace !== "")
+                return monitors[i].specialWorkspace
+        }
+        return ""
+    }
+
     function specialWorkspaces() {
         var out = []
         for (var i = 0; i < workspaces.length; i++) {
@@ -325,6 +362,83 @@ QtObject {
         if (!mon)
             return
         moveWindowToWorkspace(address, mon.activeWorkspaceId, false)
+    }
+
+    // ## Runtime configuration
+    // Under a lua config hyprctl rejects keyword outright — "keyword can't work
+    // with non-legacy parsers, use eval" — so config changes go through
+    // hyprctl eval with a lua expression. Legacy configs still take keyword.
+    //
+    // Neither survives a compositor reload, which is why the shell stores the
+    // display layout and re-applies it at startup.
+
+    property var configQueue: []
+
+    property Process configProc: Process {
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var reply = this.text.trim()
+                if (reply && reply.toLowerCase() !== "ok")
+                    console.log("HyprlandSystem config -> " + reply)
+                sys.drainConfig()
+            }
+        }
+    }
+
+    function evaluate(expression) {
+        sys.configQueue.push(["eval", expression])
+        sys.drainConfig()
+    }
+
+    function keyword(name, value) {
+        if (sys.lua)
+            return
+        sys.configQueue.push(["keyword", name, value])
+        sys.drainConfig()
+    }
+
+    function drainConfig() {
+        if (configProc.running || sys.configQueue.length === 0)
+            return
+        var next = sys.configQueue.shift()
+        configProc.command = next[0] === "eval"
+            ? ["hyprctl", "eval", next[1]]
+            : ["hyprctl", "keyword", next[1], next[2]]
+        configProc.running = true
+        refresh()
+    }
+
+    function setOption(path, value, luaValue) {
+        if (sys.lua)
+            evaluate('hl.config({["' + path + '"] = ' + luaValue + '})')
+        else
+            keyword(path, value)
+    }
+
+    function applyMonitor(name, mode, position, scale, transform) {
+        var rotation = (transform !== undefined && transform !== null) ? transform : 0
+
+        if (sys.lua) {
+            evaluate('hl.monitor({output=' + luaStr(name)
+                     + ', mode=' + luaStr(mode)
+                     + ', position=' + luaStr(position)
+                     + ', scale=' + scale
+                     + ', transform=' + rotation + '})')
+            return
+        }
+
+        var spec = name + "," + mode + "," + position + "," + scale
+        if (rotation !== 0)
+            spec += ",transform," + rotation
+        keyword("monitor", spec)
+    }
+
+    function disableMonitor(name) {
+        if (sys.lua) {
+            evaluate('hl.monitor({output=' + luaStr(name) + ', disabled=true})')
+            return
+        }
+        keyword("monitor", name + ",disable")
     }
 
     function switchWorkspace(id) {

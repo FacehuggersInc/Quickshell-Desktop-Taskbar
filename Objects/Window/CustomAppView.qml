@@ -1,471 +1,299 @@
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Controls
+import QtQuick.Controls.Basic
+import Quickshell
 
-import Qt5Compat.GraphicalEffects
 import qs.Objects.Design
-import qs.Objects.Widgets
+import qs.Objects.Design.Controls
+import qs.Objects.Theme
 
-// Custom app entry form
+// Custom launcher form. Rebuilt on the shared controls so its rows match the
+// rest of the shell instead of carrying the original hand-rolled fields.
 Item {
     id: customView
 
     signal saveRequested(var data)
 
+    property string appName: ""
+    property string appCommand: ""
+    property string appClass: ""
+    property string appIcon: ""
+    property bool lockOptions: false
+    property bool ignoreOptions: false
+    property string masqueUnder: ""
+    property var options: []
+
+    readonly property bool valid: appName.trim() !== "" && appCommand.trim() !== ""
+
     function reset() {
-        nameField.text      = ""
-        commandField.text   = ""
-        classNameField.text = ""
-        iconField.text      = ""
-        optionsModel.clear()
-        lockOptionsCheck.checked   = false
-        ignoreOptionsCheck.checked = false
-        masqueField.text           = ""
+        customView.appName = ""
+        customView.appCommand = ""
+        customView.appClass = ""
+        customView.appIcon = ""
+        customView.lockOptions = false
+        customView.ignoreOptions = false
+        customView.masqueUnder = ""
+        customView.options = []
     }
 
-    // Options model — each item has a single string that becomes one option set
-    // On save, each string is split by spaces into a list of args
-    ListModel { id: optionsModel }
+    function addOption(text) {
+        if (!text || text.trim() === "")
+            return
+        var next = customView.options.slice()
+        next.push(text.trim())
+        customView.options = next
+    }
+
+    function removeOption(index) {
+        var next = customView.options.slice()
+        next.splice(index, 1)
+        customView.options = next
+    }
+
+    // The class defaults to the command's first word, which is right often
+    // enough that asking for it up front is noise
+    function resolvedClass() {
+        if (customView.appClass.trim() !== "")
+            return customView.appClass.trim()
+        var first = customView.appCommand.trim().split(" ")[0]
+        return first.split("/").pop()
+    }
+
+    readonly property var pinnedNames: {
+        var out = []
+        var list = root.settings.launchers || []
+        for (var i = 0; i < list.length; i++)
+            out.push({ label: list[i].name, value: list[i].name })
+        return out
+    }
 
     ScrollView {
         anchors.fill: parent
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        contentHeight: formColumn.implicitHeight
         clip: true
 
         ColumnLayout {
-            id: formColumn
-            width: customView.width
-            spacing: 14
+            width: customView.width - 4
+            spacing: 0
 
-            // ── Name ─────────────────────────────────────────────
-            ColumnLayout {
+            SectionLabel {
                 Layout.fillWidth: true
-                spacing: 4
-                Text {
-                    text: "Nickname"
-                    color: root.theme.text
-                    opacity: 0.6
-                    font.family: root.settings.fontFamily
-                    font.pixelSize: 12
-                }
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 36
-                    radius: 6
-                    color: root.theme.surface
-                    TextField {
-                        id: nameField
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        placeholderText: "e.g. VS Code"
-                        color: root.theme.text
-                        font.family: root.settings.fontFamily
-                        font.pixelSize: 14
-                        background: Item {}
-                    }
+                text: "Application"
+            }
+
+            SettingRow {
+                Layout.fillWidth: true
+                label: "Name"
+                description: "Shown in the bar and in tooltips"
+                stacked: true
+
+                InputField {
+                    width: parent.width
+                    text: customView.appName
+                    placeholder: "Ghostty"
+                    onTextChanged: customView.appName = text
                 }
             }
 
-            // ── Class name ────────────────────────────────────────
-            ColumnLayout {
+            SettingRow {
                 Layout.fillWidth: true
-                spacing: 4
-                Text {
-                    text: "Class Name  (used for window matching & icon lookup)"
-                    color: root.theme.text
-                    opacity: 0.6
-                    font.family: root.settings.fontFamily
-                    font.pixelSize: 12
-                }
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 36
-                    radius: 6
-                    color: root.theme.surface
-                    TextField {
-                        id: classNameField
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        placeholderText: "e.g. code  or  org.gnome.Nautilus"
-                        color: root.theme.text
-                        font.family: root.settings.fontFamily
-                        font.pixelSize: 14
-                        background: Item {}
-                    }
+                label: "Command"
+                description: "What runs when the icon is clicked"
+                stacked: true
+
+                InputField {
+                    width: parent.width
+                    text: customView.appCommand
+                    placeholder: "ghostty"
+                    onTextChanged: customView.appCommand = text
                 }
             }
 
-            // ── Command ───────────────────────────────────────────
-            ColumnLayout {
+            SettingRow {
                 Layout.fillWidth: true
-                spacing: 4
-                Text {
-                    text: "Launch Command"
-                    color: root.theme.text
-                    opacity: 0.6
-                    font.family: root.settings.fontFamily
-                    font.pixelSize: 12
-                }
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 36
-                    radius: 6
-                    color: root.theme.surface
-                    TextField {
-                        id: commandField
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        placeholderText: "e.g. code  or  /usr/bin/code"
-                        color: root.theme.text
-                        font.family: root.settings.fontFamily
-                        font.pixelSize: 14
-                        background: Item {}
-                    }
+                label: "Window Class"
+                description: "Used to match running windows. Defaults to "
+                    + (customView.resolvedClass() !== "" ? customView.resolvedClass() : "the command")
+                stacked: true
+
+                InputField {
+                    width: parent.width
+                    text: customView.appClass
+                    placeholder: customView.resolvedClass()
+                    onTextChanged: customView.appClass = text
                 }
             }
 
-            // ── Icon path (optional) ──────────────────────────────
-            ColumnLayout {
+            SettingRow {
                 Layout.fillWidth: true
-                spacing: 4
-                Text {
-                    text: "Icon Path  (optional — leave blank to auto-detect from class name)"
-                    color: root.theme.text
-                    opacity: 0.6
-                    font.family: root.settings.fontFamily
-                    font.pixelSize: 12
-                }
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 36
-                    radius: 6
-                    color: root.theme.surface
-                    TextField {
-                        id: iconField
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        placeholderText: "e.g. /usr/share/icons/... or leave blank"
-                        color: root.theme.text
-                        font.family: root.settings.fontFamily
-                        font.pixelSize: 14
-                        background: Item {}
-                    }
+                label: "Icon"
+                description: "A .desktop icon name or an absolute path. Leave empty for the default."
+                stacked: true
+
+                InputField {
+                    width: parent.width
+                    text: customView.appIcon
+                    placeholder: "terminal"
+                    onTextChanged: customView.appIcon = text
                 }
             }
 
-            // ── Options ───────────────────────────────────────────
-            ColumnLayout {
+            SectionLabel {
                 Layout.fillWidth: true
-                spacing: 6
+                Layout.topMargin: Theme.sectionGap
+                text: "Jump List"
+            }
+
+            SettingRow {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 70
+                label: "Add an Entry"
+                description: "Extra arguments offered on right click"
+                stacked: true
 
                 RowLayout {
+                    width: parent.width
+                    spacing: Theme.gap
+
+                    InputField {
+                        id: optionField
+                        Layout.fillWidth: true
+                        placeholder: "--new-window"
+                    }
+
+                    ActionButton {
+                        label: "Add"
+                        tone: "accent"
+                        enabled: optionField.text.trim() !== ""
+                        onActivated: {
+                            customView.addOption(optionField.text)
+                            optionField.text = ""
+                        }
+                    }
+                }
+            }
+
+            Repeater {
+                model: customView.options
+
+                delegate: Rectangle {
+                    required property var modelData
+                    required property int index
+
                     Layout.fillWidth: true
+                    Layout.topMargin: 4
+                    Layout.preferredHeight: 36
+                    radius: Theme.radiusSmall
+                    color: Theme.alpha(Theme.scrimBase, 0.35)
+                    border.width: Theme.borderWidth
+                    border.color: Theme.alpha(Theme.textBase, 0.08)
+
                     Text {
-                        text: "Option Sets"
-                        color: root.theme.text
-                        font.family: root.settings.fontFamily
-                        font.weight: 600
-                        font.pixelSize: 14
-                        Layout.fillWidth: true
+                        anchors.left: parent.left
+                        anchors.leftMargin: 10
+                        anchors.right: dropButton.left
+                        anchors.rightMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData
+                        elide: Text.ElideRight
+                        color: Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.valueSize
                     }
-                    Text {
-                        text: "The Custom Sets of args that will allow quick launching of the Launch Command + Args in the context menu of a pinned app. \nEach set is a string split by spaces, this becomes the Args to launch with"
-                        color: root.theme.text
-                        opacity: 0.45
-                        font.family: root.settings.fontFamily
-                        font.pixelSize: 11
-                    }
-                    RoundButton {
-                        text: "+ Add Option Set"
-                        font.family: root.settings.fontFamily
-                        font.pixelSize: 12
-                        padding: 4
-                        horizontalPadding: 10
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: root.theme.text
-                            horizontalAlignment: Text.AlignHCenter
-                        }
-                        background: Rectangle {
-                            radius: 6
-                            color: root.theme.primary
-                            opacity: 0.5
-                        }
-                        HoverHandler { cursorShape: Qt.PointingHandCursor }
-                        onClicked: optionsModel.append({ "value": "" })
+
+                    ActionButton {
+                        id: dropButton
+                        anchors.right: parent.right
+                        anchors.rightMargin: 6
+                        anchors.verticalCenter: parent.verticalCenter
+                        label: "Remove"
+                        tone: "danger"
+                        onActivated: customView.removeOption(index)
                     }
                 }
+            }
 
-                // One row per option set
-                Repeater {
-                    model: optionsModel
-                    delegate: RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
+            SectionLabel {
+                Layout.fillWidth: true
+                Layout.topMargin: Theme.sectionGap
+                text: "Behaviour"
+            }
 
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: 34
-                            radius: 6
-                            color: root.theme.surface
+            SettingRow {
+                Layout.fillWidth: true
+                label: "Lock Jump List"
+                description: "Stop the shell adding entries it discovers on its own"
 
-                            TextField {
-                                anchors.fill: parent
-                                anchors.margins: 6
-                                text: model.value
-                                placeholderText: "e.g. --new-window /home/{user}/project"
-                                color: root.theme.text
-                                font.family: root.settings.fontFamily
-                                font.pixelSize: 13
-                                background: Item {}
-                                onTextChanged: optionsModel.setProperty(model.index, "value", text)
-                            }
-                        }
-
-                        // Remove button
-                        IconButton {
-                            iconName: "close"
-                            iconSize: 16
-                            color: "#e05555"
-                            tooltipText: "Remove"
-                            onClicked: optionsModel.remove(model.index)
-                        }
-                    }
+                ToggleSwitch {
+                    checked: customView.lockOptions
+                    onToggled: (v) => customView.lockOptions = v
                 }
+            }
+
+            SettingRow {
+                Layout.fillWidth: true
+                label: "Ignore Arguments"
+                description: "Treat every window of this app as the same launcher"
+
+                ToggleSwitch {
+                    checked: customView.ignoreOptions
+                    onToggled: (v) => customView.ignoreOptions = v
+                }
+            }
+
+            SettingRow {
+                Layout.fillWidth: true
+                label: "Masque Under"
+                description: "Fold this app's windows into an existing pinned icon"
+
+                SelectBox {
+                    width: 220
+                    placeholder: "None"
+                    options: customView.pinnedNames
+                    value: customView.masqueUnder
+                    onPicked: (v) => customView.masqueUnder = v
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: Theme.sectionGap
+                spacing: Theme.gap
+
+                ActionButton {
+                    label: "Clear"
+                    onActivated: customView.reset()
+                }
+
+                Item { Layout.fillWidth: true }
 
                 Text {
-                    visible: optionsModel.count === 0
-                    text: "No option sets — app will always launch with no args"
-                    color: root.theme.text
-                    opacity: 0.35
-                    font.family: root.settings.fontFamily
-                    font.pixelSize: 12
-                    font.italic: true
-                }
-            }
-
-            // ── Masque ───────────────────────────────────────────
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 4
-
-                Text {
-                    text: "Masque Under  (optional — class name of pinned app to merge into)"
-                    color: root.theme.text
-                    opacity: 0.6
-                    font.family: root.settings.fontFamily
-                    font.pixelSize: 12
+                    visible: !customView.valid
+                    text: "A name and a command are required"
+                    color: Theme.textMute
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.descSize
                 }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 36
-                        radius: 6
-                        color: root.theme.surface
-                        TextField {
-                            id: masqueField
-                            anchors.fill: parent
-                            anchors.margins: 6
-                            placeholderText: "e.g. code  — leave blank for none"
-                            color: root.theme.text
-                            font.family: root.settings.fontFamily
-                            font.pixelSize: 13
-                            background: Item {}
-                        }
-                    }
-
-                    // Quick-pick from pinned apps — expands inline
-                    RoundButton {
-                        id: masquePickerBtn
-                        text: masquePickerList.visible ? "Pick pinned ▴" : "Pick pinned ▾"
-                        font.family: root.settings.fontFamily
-                        font.pixelSize: 12
-                        padding: 6
-                        horizontalPadding: 14
-                        contentItem: Text {
-                            text: parent.text
-                            font: parent.font
-                            color: root.theme.text
-                            horizontalAlignment: Text.AlignHCenter
-                        }
-                        background: Rectangle {
-                            radius: 6
-                            color: root.theme.surface
-                        }
-                        HoverHandler { cursorShape: Qt.PointingHandCursor }
-                        onClicked: masquePickerList.visible = !masquePickerList.visible
-                    }
-                }
-
-                // Inline expandable list — no positioning issues
-                ColumnLayout {
-                    id: masquePickerList
-                    visible: false
-                    Layout.fillWidth: true
-                    spacing: 2
-
-                    Repeater {
-                        model: root.settings.launchers
-                        delegate: RoundButton {
-                            required property var modelData
-                            Layout.fillWidth: true
-                            padding: 6
-                            horizontalPadding: 10
-                            contentItem: RowLayout {
-                                spacing: 8
-                                Image {
-                                    source: modelData.icon && modelData.icon !== "*"
-                                        ? modelData.icon
-                                        : root.iconSource("open_app")
-                                    width: 20; height: 20
-                                    sourceSize.width: 20
-                                    sourceSize.height: 20
-                                    fillMode: Image.PreserveAspectFit
-                                }
-                                Text {
-                                    text: modelData.nickname
-                                        ? modelData.nickname + " (" + modelData.name + ")"
-                                        : modelData.name
-                                    font.family: root.settings.fontFamily
-                                    font.pixelSize: 13
-                                    color: root.theme.text
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-                            }
-                            background: Rectangle {
-                                radius: 6
-                                color: pickHov.hovered
-                                    ? root.theme.primary
-                                    : root.theme.surface
-                                opacity: pickHov.hovered ? 0.4 : 0.6
-                            }
-                            HoverHandler { id: pickHov; cursorShape: Qt.PointingHandCursor }
-                            onClicked: {
-                                masqueField.text = modelData.name
-                                masquePickerList.visible = false
-                            }
-                        }
+                ActionButton {
+                    label: "Add to Bar"
+                    tone: "accent"
+                    enabled: customView.valid
+                    onActivated: {
+                        customView.saveRequested({
+                            name: customView.appName.trim(),
+                            command: customView.appCommand.trim(),
+                            icon: customView.appIcon.trim(),
+                            className: customView.resolvedClass(),
+                            options: customView.options,
+                            lockOptions: customView.lockOptions,
+                            ignoreOptions: customView.ignoreOptions,
+                            masqueUnder: customView.masqueUnder
+                        })
                     }
                 }
             }
 
-            // ── Flags ─────────────────────────────────────────────
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 6
-
-                Text {
-                    text: "Option Flags"
-                    color: root.theme.text
-                    font.family: root.settings.fontFamily
-                    font.weight: 600
-                    font.pixelSize: 14
-                }
-
-                CheckBox {
-                    id: lockOptionsCheck
-                    text: "Lock options — never update option sets from live process args"
-                    font.family: root.settings.fontFamily
-                    font.pixelSize: 13
-                    contentItem: Text {
-                        text: lockOptionsCheck.text
-                        color: root.theme.text
-                        font: lockOptionsCheck.font
-                        leftPadding: lockOptionsCheck.indicator.width + 6
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                }
-
-                CheckBox {
-                    id: ignoreOptionsCheck
-                    text: "Ignore options — never save or show any option sets"
-                    font.family: root.settings.fontFamily
-                    font.pixelSize: 13
-                    contentItem: Text {
-                        text: ignoreOptionsCheck.text
-                        color: root.theme.text
-                        font: ignoreOptionsCheck.font
-                        leftPadding: ignoreOptionsCheck.indicator.width + 6
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                }
-            }
-
-            // ── Validation message ────────────────────────────────
-            Text {
-                id: validationMsg
-                text: ""
-                color: "#e05555"
-                font.family: root.settings.fontFamily
-                font.pixelSize: 13
-                visible: text !== ""
-            }
-
-            // ── Save button ───────────────────────────────────────
-            RoundButton {
-                Layout.fillWidth: true
-                text: "Pin App"
-                font.family: root.settings.fontFamily
-                font.pixelSize: 15
-                font.weight: 600
-                padding: 10
-
-                contentItem: Text {
-                    text: parent.text
-                    font: parent.font
-                    color: root.theme.text
-                    horizontalAlignment: Text.AlignHCenter
-                }
-                background: Rectangle {
-                    radius: 8
-                    color: root.theme.primary
-                    opacity: 0.8
-                }
-                HoverHandler { cursorShape: Qt.PointingHandCursor }
-
-                onClicked: {
-                    // Validate
-                    if (classNameField.text.trim() === "") {
-                        validationMsg.text = "Class name is required"
-                        return
-                    }
-                    if (commandField.text.trim() === "") {
-                        validationMsg.text = "Launch command is required"
-                        return
-                    }
-                    validationMsg.text = ""
-
-                    // Build options — each text field split by spaces
-                    var opts = []
-                    for (var i = 0; i < optionsModel.count; i++) {
-                        var val = optionsModel.get(i).value.trim()
-                        if (val !== "") {
-                            opts.push(val.split(/\s+/))
-                        }
-                    }
-
-                    customView.saveRequested({
-                        name:          nameField.text.trim(),
-                        command:       commandField.text.trim(),
-                        icon:          iconField.text.trim(),
-                        className:     classNameField.text.trim(),
-                        options:       opts,
-                        lockOptions:   lockOptionsCheck.checked,
-                        ignoreOptions: ignoreOptionsCheck.checked,
-                        masqueUnder:   masqueField.text.trim()
-                    })
-                }
-            }
-
-            // Bottom padding
-            Item { implicitHeight: 8 }
+            Item { Layout.preferredHeight: Theme.pagePadding }
         }
     }
 }

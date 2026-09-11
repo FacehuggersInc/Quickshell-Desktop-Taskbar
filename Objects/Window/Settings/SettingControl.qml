@@ -74,10 +74,15 @@ SettingRow {
 
     // Some settings have a side effect beyond being written to config
     function applySideEffect(name, v) {
-        if (name === "hyprAnimations")
-            root.cmdExec("hypr_set_animations", { "value": v ? "true" : "false" })
-        else if (name === "hyprBlur")
-            root.cmdExec("hypr_set_blur", { "value": v ? "true" : "false" })
+        // Through HyprlandSystem so these use the same hyprctl keyword path as
+        // the display editor rather than a config command string
+        if (name === "hyprAnimations") {
+            HyprlandSystem.setOption("animations:enabled",
+                                     v ? "1" : "0", v ? "true" : "false")
+        } else if (name === "hyprBlur") {
+            HyprlandSystem.setOption("decoration:blur:enabled",
+                                     v ? "true" : "false", v ? "true" : "false")
+        }
     }
 
     function runAction(name) {
@@ -150,12 +155,13 @@ SettingRow {
             onCommitted: (v) => entry.commit(v)
 
             // config.json is a plain object, so a nested read registers no
-            // dependency — the revision counter is what re-evaluates this
+            // dependency — the revision counter is what re-evaluates this.
+            // Suspended while focused, otherwise it overwrites what is typed.
             Binding {
                 target: field
                 property: "text"
                 value: String(entry.value(""))
-                when: entry.revision >= 0
+                when: !field.hasFocus
             }
         }
     }

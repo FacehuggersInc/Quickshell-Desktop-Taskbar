@@ -2,7 +2,7 @@
 //@ pragma IconTheme material-symbols
 
 import QtQuick
-import Quickshell 
+import Quickshell
 import Quickshell.Io
 
 import Quickshell.Services.Notifications
@@ -11,6 +11,7 @@ import qs.Objects.Window
 import qs.Objects.Window.WorkspaceOverview
 import qs.Objects.Systems
 import qs.Objects.Theme
+import qs.Objects.Design
 
 import Quickshell.Hyprland
 
@@ -27,7 +28,38 @@ ShellRoot {
         onFileChanged: this.reload()
         onAdapterUpdated: this.writeAdapter()
     }
-    property var settings: JSON.parse(configFile.text()) 
+    // A parse failure used to take the whole shell down to defaults with no
+    // indication why. This reports it and marks the config unhealthy so nothing
+    // gets written back over a file we could not read.
+    //
+    // Nothing read by this binding may also be written by it — an earlier
+    // version cached the last good copy in a property it also read here, and
+    // QML broke the cycle by disabling the binding, which emptied every page
+    // that builds from config.
+
+    property bool configValid: true
+
+    // config.json parses to a plain object, so mutating a nested value registers
+    // no dependency and bindings that read it never re-evaluate. Anything that
+    // needs to react to a settings write reads this counter as well.
+    property int settingsRevision: 0
+
+    property var settings: {
+        var raw = configFile.text()
+        try {
+            var parsed = JSON.parse(raw)
+            if (parsed && typeof parsed === "object") {
+                root.configValid = true
+                return parsed
+            }
+            console.log("config.json did not parse to an object")
+        } catch (e) {
+            console.log("config.json is not valid JSON: " + e)
+        }
+        root.configValid = false
+        return ({})
+    }
+
     property var utill: {
         var interpreter = (settings.utill && settings.utill.interpreter)
             ? settings.utill.interpreter : "python3"
@@ -41,7 +73,10 @@ ShellRoot {
     // authored — mode source, accent source, accent, glass on/off, scrim
     // strength. Everything else is derived and never written back.
 
-    readonly property var themeConfig: settings.theme || ({})
+    readonly property var themeConfig: {
+        var bump = root.settingsRevision
+        return settings.theme || ({})
+    }
     readonly property var theme: Theme.legacy
 
     property bool darkMode: true
@@ -83,6 +118,580 @@ ShellRoot {
         return best
     }
 
+    // Monitor settings do not survive a compositor reload, so the stored layout
+    // is re-applied once the event socket has reported what is connected
+    Binding { target: DisplaySystem; property: "settings"; value: root.settings }
+
+    Connections {
+        target: DisplaySystem
+        function onSaveRequested() { root.saveSettings() }
+    }
+
+    // ## Hyprland lua config
+    // Only .lua is read now. The .conf form is not scanned — this shell writes
+    // lua, and showing both invited edits landing in a file Hyprland ignores.
+
+    Process {
+        id: luaMonitorsProc
+        command: root.newUtill(["--luamonitors"])
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var text = this.text.trim()
+                var out = []
+                if (text && text !== "none") {
+                    var entries = text.split("\u001e")
+                    for (var i = 0; i < entries.length; i++) {
+                        var parts = entries[i].split("\u001f")
+                        if (parts.length < 4) continue
+
+                        var fields = ({})
+                        var pairs = parts[3].split(";")
+                        for (var j = 0; j < pairs.length; j++) {
+                            var kv = pairs[j].split("=")
+                            if (kv.length >= 2)
+                                fields[kv[0]] = kv.slice(1).join("=")
+                        }
+
+                        out.push({
+                            file: parts[0],
+                            line: parseInt(parts[1]),
+                            output: parts[2],
+                            fields: fields
+                        })
+                    }
+                }
+                DisplaySystem.configLines = out
+                DisplaySystem.configScanned = true
+            }
+        }
+    }
+
+    Process {
+        id: luaWriteProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var reply = this.text.trim()
+                if (reply.indexOf("ok:") === 0) {
+                    console.log("hyprland.lua updated, backup at " + reply.substring(3))
+                    luaMonitorsProc.running = true
+                } else {
+                    console.log("hyprland.lua not written: " + reply)
+                    root.notify("Display Settings",
+                                "Could not write to your Hyprland config.\n" + reply,
+                                "brightness")
+                }
+            }
+        }
+    }
+
+    Connections {
+        target: DisplaySystem
+        function onWriteRequested(output, updates) {
+            if (luaWriteProc.running)
+                return
+            var args = ["--luawritemonitor", output]
+            for (var key in updates)
+                args.push(key + "=" + updates[key])
+            luaWriteProc.command = root.newUtill(args)
+            luaWriteProc.running = true
+        }
+    }
+
+    // ## Hotkeys
+    // Same surgical-write model as monitors: read what is there, replace only
+    // the call being edited, back up first.
+
+    Process {
+        id: luaBindsProc
+        command: root.newUtill(["--luabinds"])
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var text = this.text.trim()
+                var out = []
+                if (text && text !== "none") {
+                    var entries = text.split("\u001e")
+                    for (var i = 0; i < entries.length; i++) {
+                        var parts = entries[i].split("\u001f")
+                        if (parts.length < 6) continue
+                        out.push({
+                            file: parts[0],
+                            line: parseInt(parts[1]),
+                            key: parts[2],
+                            kind: parts[3],
+                            detail: parts[4],
+                            action: parts[5],
+                            options: parts.length > 6 ? parts[6] : ""
+                        })
+                    }
+                }
+                HotkeySystem.binds = out
+                HotkeySystem.scanned = true
+            }
+        }
+    }
+
+    Process {
+        id: luaBindWriteProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var reply = this.text.trim()
+                if (reply.indexOf("ok:") === 0) {
+                    luaBindsProc.running = true
+                } else {
+                    console.log("hyprland.lua bind not written: " + reply)
+                    root.notify("Hotkeys",
+                                "Could not write to your Hyprland config.\n" + reply,
+                                "settings")
+                }
+            }
+        }
+    }
+
+    function runBindWrite(args) {
+        if (luaBindWriteProc.running)
+            return
+        luaBindWriteProc.command = root.newUtill(args)
+        luaBindWriteProc.running = true
+    }
+
+    Connections {
+        target: HotkeySystem
+
+        function onReadRequested() {
+            if (!luaBindsProc.running) luaBindsProc.running = true
+        }
+
+        function onAddRequested(key, command) {
+            root.runBindWrite(["--luaaddbind", key,
+                               HotkeySystem.execExpression(command)])
+        }
+
+        function onUpdateRequested(file, line, key, command, options) {
+            var args = ["--luawritebind", file, String(line), key,
+                        HotkeySystem.execExpression(command)]
+            if (options && options !== "")
+                args.push(options)
+            root.runBindWrite(args)
+        }
+
+        function onRemoveRequested(file, line) {
+            root.runBindWrite(["--luadeletebind", file, String(line)])
+        }
+    }
+
+    // ## Startup commands
+
+    Process {
+        id: luaStartupProc
+        command: root.newUtill(["--luastartup"])
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var text = this.text.trim()
+                var out = []
+                if (text && text !== "none") {
+                    var entries = text.split("\u001e")
+                    for (var i = 0; i < entries.length; i++) {
+                        var parts = entries[i].split("\u001f")
+                        if (parts.length < 3) continue
+                        out.push({
+                            file: parts[0],
+                            line: parseInt(parts[1]),
+                            command: parts[2]
+                        })
+                    }
+                }
+                StartupSystem.entries = out
+                StartupSystem.scanned = true
+            }
+        }
+    }
+
+    Process {
+        id: luaStartupWriteProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var reply = this.text.trim()
+                if (reply.indexOf("ok:") === 0) {
+                    luaStartupProc.running = true
+                } else {
+                    console.log("startup entry not written: " + reply)
+                    root.notify("Startup Apps",
+                                "Could not write to your Hyprland config.\n" + reply,
+                                "settings")
+                }
+            }
+        }
+    }
+
+    function runStartupWrite(args) {
+        if (luaStartupWriteProc.running)
+            return
+        luaStartupWriteProc.command = root.newUtill(args)
+        luaStartupWriteProc.running = true
+    }
+
+    Connections {
+        target: StartupSystem
+
+        function onReadRequested() {
+            if (!luaStartupProc.running) luaStartupProc.running = true
+        }
+
+        function onAddRequested(command) {
+            root.runStartupWrite(["--luaaddstartup", command])
+        }
+
+        function onUpdateRequested(file, line, command) {
+            root.runStartupWrite(["--luawritestartup", file, String(line), command])
+        }
+
+        function onRemoveRequested(file, line) {
+            root.runStartupWrite(["--luadeletestartup", file, String(line)])
+        }
+    }
+
+    // ## Mime handlers
+
+    Process {
+        id: mimeReadProc
+        command: root.newUtill(["--mimetypes"])
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var text = this.text.trim()
+                var out = []
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 1 || !parts[0]) continue
+                        var candidates = (parts.length > 2 && parts[2] !== "")
+                            ? parts[2].split(",") : []
+                        out.push({
+                            mime: parts[0],
+                            current: parts.length > 1 ? parts[1] : "",
+                            candidates: candidates,
+                            extensions: parts.length > 3 ? parts[3] : "",
+                            added: (parts.length > 4 && parts[4] !== "")
+                                ? parts[4].split(",") : []
+                        })
+                    }
+                }
+                MimeSystem.entries = out
+                MimeSystem.scanned = true
+            }
+        }
+    }
+
+    Process {
+        id: mimeWriteProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var reply = this.text.trim()
+                if (reply === "ok") {
+                    mimeReadProc.running = true
+                } else {
+                    console.log("mimeapps.list not written: " + reply)
+                    root.notify("File Associations",
+                                "Could not update mimeapps.list.\n" + reply,
+                                "settings")
+                }
+            }
+        }
+    }
+
+    Connections {
+        target: MimeSystem
+
+        function onReadRequested() {
+            if (!mimeReadProc.running) mimeReadProc.running = true
+        }
+
+        function onSetRequested(mime, desktopId, claim) {
+            if (mimeWriteProc.running) return
+            var args = ["--mimeset", mime, desktopId]
+            if (claim) args.push("claim")
+            mimeWriteProc.command = root.newUtill(args)
+            mimeWriteProc.running = true
+        }
+
+        function onClearRequested(mime, unclaim) {
+            if (mimeWriteProc.running) return
+            var args = ["--mimeclear", mime]
+            if (unclaim) args.push("unclaim")
+            mimeWriteProc.command = root.newUtill(args)
+            mimeWriteProc.running = true
+        }
+    }
+
+    // ## Network
+
+    Process {
+        id: netDevicesProc
+        command: root.newUtill(["--netdevices"])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var out = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 4) continue
+                        out.push({
+                            device: parts[0], type: parts[1],
+                            state: parts[2], connection: parts[3]
+                        })
+                    }
+                }
+                NetworkSystem.devices = out
+                netConnectionsProc.running = true
+            }
+        }
+    }
+
+    Process {
+        id: netConnectionsProc
+        command: root.newUtill(["--netconnections"])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var out = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 5) continue
+                        out.push({
+                            name: parts[0], uuid: parts[1], type: parts[2],
+                            device: parts[3], active: parts[4] === "yes"
+                        })
+                    }
+                }
+                NetworkSystem.connections = out
+                netRadioProc.running = true
+            }
+        }
+    }
+
+    Process {
+        id: netRadioProc
+        command: root.newUtill(["--netradio"])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                NetworkSystem.wifiRadio = this.text.trim()
+                netWifiProc.running = true
+            }
+        }
+    }
+
+    Process {
+        id: netWifiProc
+        command: root.newUtill(["--netwifi"])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var out = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 4) continue
+                        out.push({
+                            active: parts[0] === "yes", ssid: parts[1],
+                            signal: parts[2], security: parts[3]
+                        })
+                    }
+                    out.sort(function(a, b) {
+                        return parseInt(b.signal) - parseInt(a.signal)
+                    })
+                }
+                NetworkSystem.networks = out
+                NetworkSystem.scanned = true
+                NetworkSystem.busy = false
+            }
+        }
+    }
+
+    Process {
+        id: netActionProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var reply = this.text.trim()
+                NetworkSystem.busy = false
+                if (reply.indexOf("error:") === 0) {
+                    NetworkSystem.lastError = reply.substring(6)
+                    root.notify("Network", NetworkSystem.lastError, "wired")
+                } else {
+                    NetworkSystem.lastError = ""
+                }
+                netDevicesProc.running = true
+            }
+        }
+    }
+
+    function runNetAction(args) {
+        if (netActionProc.running)
+            return
+        NetworkSystem.busy = true
+        netActionProc.command = root.newUtill(args)
+        netActionProc.running = true
+    }
+
+    Connections {
+        target: NetworkSystem
+
+        function onReadRequested() {
+            if (!netDevicesProc.running) netDevicesProc.running = true
+        }
+
+        function onScanRequested() {
+            NetworkSystem.busy = true
+            root.runNetAction(["--netwifiscan"])
+        }
+
+        function onRadioRequested(state) {
+            root.runNetAction(["--netradio", state])
+        }
+
+        function onConnectRequested(kind, target, secret) {
+            if (kind === "wifi")
+                root.runNetAction(["--netconnect", "wifi", target, secret])
+            else
+                root.runNetAction(["--netconnect", target])
+        }
+
+        function onDisconnectRequested(target) {
+            root.runNetAction(["--netdisconnect", target])
+        }
+
+        function onForgetRequested(target) {
+            root.runNetAction(["--netforget", target])
+        }
+    }
+
+    // ## Packages
+
+    Process {
+        id: pkgListProc
+        command: root.newUtill(["--pkglist"])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var out = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 2) continue
+                        out.push({
+                            source: parts[0],
+                            name: parts[1],
+                            version: parts.length > 2 ? parts[2] : "",
+                            installed: parts.length > 3 ? parts[3] : "",
+                            description: parts.length > 4 ? parts[4] : "",
+                            depends: parts.length > 5 ? parts[5] : "",
+                            size: parts.length > 6 ? parts[6] : ""
+                        })
+                    }
+                }
+                PackageSystem.packages = out
+                PackageSystem.scanned = true
+                pkgHelperProc.running = true
+            }
+        }
+    }
+
+    Process {
+        id: pkgHelperProc
+        command: root.newUtill(["--pkghelper"])
+        stdout: StdioCollector {
+            onStreamFinished: PackageSystem.helper = this.text.trim()
+        }
+    }
+
+    Process {
+        id: pkgUpdatesProc
+        command: root.newUtill(["--pkgupdates"])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var out = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 2) continue
+                        out.push({
+                            source: parts[0],
+                            name: parts[1],
+                            current: parts.length > 2 ? parts[2] : "",
+                            next: parts.length > 3 ? parts[3] : ""
+                        })
+                    }
+                }
+                PackageSystem.updates = out
+                PackageSystem.busy = false
+            }
+        }
+    }
+
+    Process { id: terminalProc }
+
+    // Handed to a terminal so the command is visible and confirmed. The shell
+    // never runs a privileged package command itself.
+    function runInTerminal(command, title) {
+        var wrapped = command + "; echo; echo '--- done, press enter ---'; read"
+        var commands = root.settings.commands || ({})
+        var custom = commands.terminal_run || ""
+
+        if (custom) {
+            // terminal_run is written to be concatenated — "ghostty -e bash -c"
+            // with the command appended as one argument. Only substitute when
+            // the entry actually carries a placeholder.
+            if (custom.indexOf("{command}") !== -1)
+                terminalProc.command = root.cmd("terminal_run", { "command": wrapped })
+            else
+                terminalProc.command = root.cmd("terminal_run").concat([wrapped])
+        } else if (commands.terminal) {
+            terminalProc.command =
+                root.cmd("terminal").concat(["-e", "bash", "-c", wrapped])
+        } else {
+            root.notify("Packages", "No terminal command configured.", "terminal")
+            return
+        }
+
+        terminalProc.running = true
+    }
+
+    Connections {
+        target: PackageSystem
+
+        function onReadRequested() {
+            if (!pkgListProc.running) pkgListProc.running = true
+        }
+
+        function onUpdatesRequested() {
+            if (pkgUpdatesProc.running) return
+            PackageSystem.busy = true
+            pkgUpdatesProc.running = true
+        }
+
+        function onTerminalRequested(command, title) {
+            root.runInTerminal(command, title)
+        }
+    }
+
+    Timer {
+        id: displayRestoreTimer
+        interval: 1500
+        repeat: false
+        onTriggered: DisplaySystem.applyAll()
+    }
+
     Timer {
         id: darkModeTimer
         interval: 60000
@@ -99,6 +708,16 @@ ShellRoot {
         target: Theme
         property: "glass"
         value: root.themeConfig.glass !== undefined ? root.themeConfig.glass : true
+    }
+    Binding {
+        target: IconMap
+        property: "mode"
+        value: root.themeConfig.icons || "auto"
+    }
+    Binding {
+        target: IconMap
+        property: "family"
+        value: root.themeConfig.iconFamily || "Material Symbols Rounded"
     }
     Binding {
         target: Theme
@@ -142,9 +761,31 @@ ShellRoot {
     property var monitorInfos: []          // full monitor info sorted left-to-right
 
     // ## Monitors
-    // Read from the Hyprland event socket rather than shelling out to hyprctl.
-    // settings.displays is still persisted so the wallpaper and theater code can
-    // index into a stable left-to-right ordering.
+    // Live from the Hyprland event socket. Nothing about which displays exist is
+    // stored in config any more — a name is stable, an array index is not.
+
+    readonly property var displayNames: {
+        var out = []
+        var mons = HyprlandSystem.monitors
+        for (var i = 0; i < mons.length; i++)
+            out.push(mons[i].name)
+        return out
+    }
+
+    readonly property string primaryDisplay: {
+        var configured = root.settings.primaryDisplay
+        if (configured && root.displayNames.indexOf(configured) !== -1)
+            return configured
+        var focused = HyprlandSystem.focusedMonitor
+        if (focused && root.displayNames.indexOf(focused) !== -1)
+            return focused
+        return root.displayNames.length > 0 ? root.displayNames[0] : ""
+    }
+
+    readonly property int primaryDisplayIndex: {
+        var idx = root.displayNames.indexOf(root.primaryDisplay)
+        return idx === -1 ? 0 : idx
+    }
 
     function syncMonitors() {
         var mons = HyprlandSystem.monitors
@@ -152,33 +793,32 @@ ShellRoot {
             return
 
         var res = {}
-        var names = []
-        var focusedIdx = 0
-        for (var i = 0; i < mons.length; i++) {
-            var m = mons[i]
-            res[m.name] = { w: m.w, h: m.h }
-            names.push(m.name)
-            if (m.focused) focusedIdx = i
-        }
+        for (var i = 0; i < mons.length; i++)
+            res[mons[i].name] = { w: mons[i].w, h: mons[i].h }
 
         root.monitorResolutions = res
         root.monitorInfos = mons
+    }
 
-        var current = root.settings.displays || []
-        var changed = names.length !== current.length
-        if (!changed) {
-            for (var j = 0; j < names.length; j++) {
-                if (names[j] !== current[j]) { changed = true; break }
-            }
+    // One time move from the old positional scheme. displays was an array of
+    // connector names and primaryDisplayIndex pointed into it, so both broke
+    // whenever a monitor was unplugged or the order changed.
+    function migrateDisplayConfig() {
+        if (root.settings.primaryDisplay !== undefined)
+            return
+
+        var old = root.settings.displays
+        var idx = root.settings.primaryDisplayIndex
+        if (old && old.length > 0 && idx !== undefined && idx !== null
+                && idx >= 0 && idx < old.length) {
+            root.settings.primaryDisplay = old[idx]
+        } else {
+            root.settings.primaryDisplay = HyprlandSystem.focusedMonitor
         }
-        if (changed) {
-            root.settings.displays = names
-            if (root.settings.primaryDisplayIndex === undefined
-                    || root.settings.primaryDisplayIndex === null) {
-                root.settings.primaryDisplayIndex = focusedIdx
-            }
-            root.saveSettings()
-        }
+
+        delete root.settings.displays
+        delete root.settings.primaryDisplayIndex
+        root.saveSettings()
     }
 
     Connections {
@@ -245,9 +885,9 @@ ShellRoot {
                 var rawCmd = (root.settings.commands && root.settings.commands.wallpaper_set)
                     || "awww img -o {display} {wallpaper}"
 
-                for (var j = 0; j < root.settings.displays.length; j++) {
+                for (var j = 0; j < root.displayNames.length; j++) {
                     if (j !== primary) {
-                        var connector = root.settings.displays[j]
+                        var connector = root.displayNames[j]
                         var ddcNum = root.ddcMap[connector] || (j + 1)
                         root.execute(root.newUtill(["--ddcsetbrightness", ddcNum, dim]))
                         if (wp !== "") {
@@ -272,7 +912,7 @@ ShellRoot {
         var theater = settings.theater || {}
         var primary = (theater.primaryDisplay !== undefined && theater.primaryDisplay !== null)
             ? theater.primaryDisplay
-            : (settings.primaryDisplayIndex || 0)
+            : root.primaryDisplayIndex
         var dimBrightness  = theater.dimBrightness !== undefined ? theater.dimBrightness : 10
         var theaterWallpaper = theater.wallpaper || ""
 
@@ -284,9 +924,9 @@ ShellRoot {
             theaterBrightnessProc.running = true
         } else {
             // Restore brightness on non-primary displays using correct DDC numbers
-            for (var k = 0; k < settings.displays.length; k++) {
+            for (var k = 0; k < root.displayNames.length; k++) {
                 if (k !== primary) {
-                    var restoreConnector = settings.displays[k]
+                    var restoreConnector = root.displayNames[k]
                     var restoreDdc = root.ddcMap[restoreConnector] || (k + 1)
                     root.execute(root.newUtill(["--ddcsetbrightness", restoreDdc, theaterPrevBrightness[k] || 50]))
                 }
@@ -305,6 +945,8 @@ ShellRoot {
 
     Component.onCompleted: {
         BrightnessSystem.read()
+        root.migrateDisplayConfig()
+        displayRestoreTimer.restart()
 
         // Reset theater mode if it was left on from previous session
         var theater = settings.theater || {}
@@ -339,7 +981,28 @@ ShellRoot {
     }
 
     function saveSettings(){
-        configFile.setText( JSON.stringify( settings, null, 4 ) )
+        // Refuse to write when the in memory copy is not trustworthy, otherwise
+        // one bad parse gets serialised back over a good file permanently
+        if (!root.configValid || !settings || typeof settings !== "object") {
+            console.log("saveSettings refused: config is not in a healthy state")
+            return
+        }
+
+        var text = ""
+        try {
+            text = JSON.stringify(settings, null, 4)
+        } catch (e) {
+            console.log("saveSettings refused: could not serialise settings — " + e)
+            return
+        }
+
+        if (!text || text.length < 2 || text === "null" || text === "undefined") {
+            console.log("saveSettings refused: serialised config was empty")
+            return
+        }
+
+        configFile.setText(text)
+        root.settingsRevision++
     }
 
     // cmd() — look up a command by key and return as args array
@@ -521,8 +1184,9 @@ ShellRoot {
     }
 
     function launchWallpaperProc() {
-        var count = (settings.wallpapers.randomWallpaperPerDisplay && settings.displays && settings.displays.length > 0)
-            ? settings.displays.length : 1
+        var count = (settings.wallpapers.randomWallpaperPerDisplay
+                     && root.displayNames.length > 0)
+            ? root.displayNames.length : 1
         wallpaperRandomChoice.command = root.newUtill(["--randomfile", wallpaperRandomChoice.wallpaperFolder, count])
         wallpaperRandomChoice.running = true
     }
@@ -776,8 +1440,8 @@ ShellRoot {
                     || settings.wallpapers.setWallpaperCommand
                     || "awww img -o {display} {wallpaper}"
                 var setWallpaperCommand = rawCommand
-                for (var i = 0; i < settings.displays.length; i++) {
-                    var display = settings.displays[i]
+                for (var i = 0; i < root.displayNames.length; i++) {
+                    var display = root.displayNames[i]
 
                     var wallpaper = null
                     if (settings.wallpapers.randomWallpaperPerDisplay) {
@@ -818,7 +1482,12 @@ ShellRoot {
                     execute(wallpaperCmd.split(" "))
                 }
                 
-                root.wallpaperColors.source = Qt.resolvedUrl(wallpapers[settings.primaryDisplayIndex].trim())
+                // The index can point past the list when a monitor is absent
+                var pick = wallpapers[root.primaryDisplayIndex]
+                if (!pick && wallpapers.length > 0)
+                    pick = wallpapers[0]
+                if (pick)
+                    root.wallpaperColors.source = Qt.resolvedUrl(String(pick).trim())
             }
         }
     }
@@ -857,6 +1526,36 @@ ShellRoot {
             root.overview.close()
         }
     }
+
+    // Set by the app bar once it builds. Lets the settings window reach the
+    // add-app picker without duplicating it.
+    property var addAppWindow: null
+
+    // Published by their widgets so the quick panel can open the real popups
+    // rather than instantiating a second set
+    property var audioPopup: null
+    property var networkPopup: null
+    property var bluetoothPopup: null
+
+    // The popup only polls while it is open, so adapter state comes from the
+    // widget, which polls regardless
+    property var bluetoothWidget: null
+    property var volumeWidget: null
+    property var barMenu: null
+
+    // Widgets that own a right click menu. The bar wide handler sits on top, so
+    // it has to decline presses that land on these.
+    property var rightClickClaims: []
+
+    function claimRightClick(item) {
+        if (!item) return
+        var next = root.rightClickClaims.slice()
+        if (next.indexOf(item) === -1) {
+            next.push(item)
+            root.rightClickClaims = next
+        }
+    }
+    property var appBar: null
 
     // -- UI OBJECTS
     property WorkspaceOverview overview: WorkspaceOverview {}

@@ -282,6 +282,38 @@ PanelWindow {
             anchors.centerIn: parent
             spacing: 20
 
+            // An escape hatch that does not depend on finding the right tile
+            Rectangle {
+                Layout.alignment: Qt.AlignHCenter
+                visible: HyprlandSystem.anySpecialShowing() !== ""
+                width: hideText.implicitWidth + 28
+                height: 30
+                radius: Theme.radiusSmall
+                color: hideArea.containsMouse ? Theme.alpha(Theme.accent, 0.24)
+                                              : Theme.alpha(Theme.accent, 0.14)
+                border.width: Theme.borderWidth
+                border.color: Theme.accentLine
+
+                Text {
+                    id: hideText
+                    anchors.centerIn: parent
+                    text: "Hide bucket showing on screen"
+                    color: Theme.accentText
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.valueSize
+                    font.weight: 600
+                }
+
+                MouseArea {
+                    id: hideArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: HyprlandSystem.toggleSpecial(
+                        HyprlandSystem.anySpecialShowing())
+                }
+            }
+
             Text {
                 Layout.alignment: Qt.AlignHCenter
                 text: "Buckets"

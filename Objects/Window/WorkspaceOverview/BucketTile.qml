@@ -12,13 +12,20 @@ Rectangle {
     readonly property var windows: HyprlandSystem.windowsOnSpecial(name)
     readonly property bool hovered: owner ? owner.dropTarget === ("bucket:" + name) : false
 
+    readonly property string showingOn: HyprlandSystem.monitorShowing(name)
+    readonly property bool peeked: showingOn !== ""
+
     implicitWidth: Math.max(190, chips.implicitWidth + 24)
     implicitHeight: 128
 
     radius: Theme.radius
-    color: Theme.alpha(Theme.scrimBase, 0.80)
-    border.width: hovered ? 2 : Theme.borderWidth
-    border.color: hovered ? Theme.accent : Theme.borderStrong
+    color: peeked ? Theme.alpha(Theme.accent, 0.16)
+                  : Theme.alpha(Theme.scrimBase, 0.80)
+    border.width: hovered || peeked ? 2 : Theme.borderWidth
+    border.color: hovered ? Theme.accent
+                          : (peeked ? Theme.accentLine : Theme.borderStrong)
+
+    Behavior on color { ColorAnimation { duration: Theme.durFast } }
 
     Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
     Behavior on implicitWidth { NumberAnimation { duration: Theme.durNormal; easing.type: Easing.OutCubic } }
@@ -32,6 +39,18 @@ Rectangle {
         color: Theme.textDim
         font.family: Theme.fontFamily
         font.pixelSize: 12
+        font.weight: 600
+    }
+
+    Text {
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.margins: 8
+        visible: bucket.peeked
+        text: "showing on " + bucket.showingOn + " · double click to hide"
+        color: Theme.accentText
+        font.family: Theme.fontFamily
+        font.pixelSize: 9
         font.weight: 600
     }
 

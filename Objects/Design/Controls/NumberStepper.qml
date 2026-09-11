@@ -10,7 +10,6 @@ Item {
     property int to: 100
     property int step: 1
     property string suffix: ""
-    property bool enabled: true
     signal changed(int value)
 
     implicitWidth: Theme.controlMinWidth
@@ -69,8 +68,7 @@ Item {
                 id: stepArea
                 anchors.fill: parent
                 hoverEnabled: true
-                enabled: control.enabled
-                cursorShape: Qt.PointingHandCursor
+                                cursorShape: Qt.PointingHandCursor
                 onClicked: control.apply(control.value + modelData.delta * control.step)
 
                 onPressAndHold: repeatTimer.start()

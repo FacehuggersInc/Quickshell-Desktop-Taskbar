@@ -211,6 +211,13 @@ monitor is gone, it falls back to the bounding box of the windows.
 Peek is `hl.dsp.workspace.toggle_special`: one dispatch, reversible, and the
 arrangement inside the bucket survives. Toggling again sends the windows back.
 
+A peeked bucket sits **on top of** the real workspace rather than replacing it,
+and Hyprland reports it as `specialWorkspace` on the monitor. The tile shows
+which monitor it is on and stays accented, the overview no longer closes after a
+peek — doing so left nothing to toggle it back off with — and a "hide bucket
+showing on screen" button appears while any special is up, so recovery never
+depends on finding the right tile.
+
 Empty is a permanent relocation and moves windows one at a time. A single
 dispatch that promotes a whole workspace would be better, but on Hyprland 0.56.2
 `hl.dsp.workspace.move_to_monitor` is nil and no `swap_active` exists. Hyprland's
@@ -366,3 +373,69 @@ first with no way to choose another.
 
 Buckets appear underneath, so stashing is one click from the same place and
 follows the same selection.
+
+---
+
+# Displays
+
+`Objects/Systems/DisplaySystem.qml` and `Objects/Window/Settings/DisplaysPage.qml`.
+
+Connected monitors come from the event socket — make, model, serial, current
+mode, scale, transform and `availableModes`. Nothing about which displays exist
+is stored in config any more.
+
+## The config migration
+
+`settings.displays` was an array of connector names and `primaryDisplayIndex`
+pointed into it, so unplugging a monitor or changing the order silently moved
+which display was primary. Both are gone.
+
+`primaryDisplay` is a monitor name now, and `migrateDisplayConfig()` converts the
+old pair once on startup, resolving the old index against the old array before
+deleting both keys. Wallpaper cycling, theater mode and the ddc mapping all read
+from live monitor names.
+
+## Why the shell stores the layout
+
+`keyword` is **not** a dispatcher. `Hyprland.dispatch()` wraps whatever it is
+given in `hl.dispatch(...)`, so routing a keyword through it is a syntax error
+under a lua config. `HyprlandSystem.keyword()` runs a real `hyprctl keyword`
+process instead, queued so overlapping changes do not race.
+
+`hyprctl keyword monitor …` applies instantly but does **not** survive a
+compositor reload, because Hyprland reads monitors from its own config. Writing
+into your Lua config would mean generating code into a file you hand edit, so
+instead the layout lives under `displays.layout` keyed by monitor name and is
+re-applied 1.5s after startup, once the socket has reported what is connected.
+
+If it ever misbehaves, delete that key — nothing else depends on it, and the
+monitor falls back to whatever Hyprland's own config says. Forget Saved Layout
+does the same for one monitor.
+
+## Arrangement
+
+Monitors are drawn at their real relative positions scaled to fit, and dragging
+one writes its position straight back — the canvas coordinates *are* Hyprland's
+coordinates, just scaled.
+
+## Modes
+
+`availableModes` arrives as `1920x1080@144.00Hz` strings. Resolutions are the
+deduplicated sizes; refresh rates are filtered to the chosen resolution, and
+changing resolution keeps the current rate only if the new mode supports it.
+
+## Reading your Hyprland config
+
+`--hyprmonitorconfig` scans `~/.config/hypr` for monitor lines in both the lua
+(`hl.monitor(...)`) and hyprlang (`monitor=`) forms, pulls the connector name out
+of each, and reports file, line, text and target. The page lists them and warns
+when a line targets a monitor the shell also has a stored layout for.
+
+That matters because whichever applies last wins. Without it, the only symptom of
+a conflict is a display setting quietly reverting on reload, with nothing to
+point at.
+
+## HDR
+
+Not exposed. Hyprland's colour management options have moved between versions
+and the 0.56 syntax has not been checked against your compositor.

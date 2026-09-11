@@ -13,7 +13,7 @@ PopupWindow {
 
     anchor.window: mainWindow
     anchor.rect.x: 0
-    anchor.rect.y: mainWindow.implicitHeight + 4
+    anchor.rect.y: mainWindow.popupOffset(implicitHeight - 1)
 
     implicitWidth:  tooltipLabel.implicitWidth + 20
     implicitHeight: 26

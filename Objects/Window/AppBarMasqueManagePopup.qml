@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Controls
 
 import qs.Objects.Design
+import qs.Objects.Theme
 import qs.Objects.Widgets
 import qs.Objects.Window
 
@@ -32,9 +33,9 @@ PopupPanel {
 
             Text {
                 text: "Remove masque:"
-                color: root.theme.text
+                color: Theme.text
                 opacity: 0.55
-                font.family: root.settings.fontFamily
+                font.family: Theme.fontFamily
                 font.pixelSize: 12
                 font.weight: 600
                 Layout.fillWidth: true
@@ -43,7 +44,7 @@ PopupPanel {
             IconButton {
                 iconName: "close"
                 iconSize: 14
-                color: root.theme.text
+                color: Theme.text
                 tooltipText: "Cancel"
                 onClicked: masqueManagePopup.forceClose()
             }
@@ -59,32 +60,30 @@ PopupPanel {
 
                 contentItem: RowLayout {
                     spacing: 8
-                    Image {
-                        source: root.iconSource("masked")
-                        width: 18; height: 18
-                        sourceSize.width: 18; sourceSize.height: 18
-                        fillMode: Image.PreserveAspectFit
-                        opacity: 0.7
-                    }
+                    Icon {
+    iconName: "masked"
+    iconSize: 18
+    color: Theme.accentIcon
+    opacity: 0.7
+}
                     Text {
                         text: modelData.className
-                        font.family: root.settings.fontFamily
+                        font.family: Theme.fontFamily
                         font.pixelSize: 13
                         font.weight: 500
-                        color: root.theme.text
+                        color: Theme.text
                         Layout.fillWidth: true
                     }
-                    Image {
-                        source: root.iconSource("close")
-                        width: 14; height: 14
-                        sourceSize.width: 14; sourceSize.height: 14
-                        fillMode: Image.PreserveAspectFit
-                        opacity: 0.6
-                    }
+                    Icon {
+    iconName: "close"
+    iconSize: 14
+    color: Theme.accentIcon
+    opacity: 0.6
+}
                 }
                 background: Rectangle {
                     radius: 6
-                    color: manageHov.hovered ? "#e05555" : "transparent"
+                    color: manageHov.hovered ? Theme.danger : "transparent"
                     opacity: manageHov.hovered ? 0.18 : 1
                 }
                 HoverHandler { id: manageHov; cursorShape: Qt.PointingHandCursor }

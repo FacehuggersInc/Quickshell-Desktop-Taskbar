@@ -16,6 +16,7 @@ IconButton {
 
     Component.onCompleted: {
         root.notifyServer.notification.connect(notifyWidget.onNewNotification)
+        notifyWidget.updateBadge()
     }
 
     NotificationsPanel {
@@ -53,21 +54,15 @@ IconButton {
         }
     }
 
-    // Poll count reactively — catches dismissals and any missed signals
-    Timer {
-        id: badgePoller
-        interval: 500
-        repeat: true
-        running: true
-        onTriggered: notifyWidget.updateBadge()
-    }
+    // ## Badge
+    // The model's length is a bindable property, so the count updates itself.
+    // The old handlers named signals the target does not have — they warned on
+    // every start and never fired, leaving a 500ms poll doing the real work.
 
-    // Also wire object signals as a fast path for immediate updates
-    Connections {
-        target: root.notifyServer.trackedNotifications
-        function onObjectInserted() { notifyWidget.updateBadge() }
-        function onObjectRemoved()  { notifyWidget.updateBadge() }
-    }
+    readonly property int notificationCount: root.notifyServer
+        ? root.notifyServer.trackedNotifications.values.length : 0
+
+    onNotificationCountChanged: notifyWidget.updateBadge()
 
     onClicked: notificationsPanel.toggle(notifyWidget)
 }

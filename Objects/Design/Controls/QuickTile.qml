@@ -10,7 +10,6 @@ Rectangle {
     property string label: ""
     property string sublabel: ""
     property bool active: false
-    property bool enabled: true
     signal activated()
 
     implicitHeight: 62
@@ -76,7 +75,7 @@ Rectangle {
         id: tileArea
         anchors.fill: parent
         hoverEnabled: true
-        enabled: tile.enabled
+
         cursorShape: Qt.PointingHandCursor
         onClicked: tile.activated()
     }

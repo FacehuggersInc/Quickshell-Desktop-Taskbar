@@ -402,3 +402,86 @@ Throughput is now read from `/proc/net/dev` through a `FileView` and differenced
 in QML once a second, with no subprocess at all. `lo`, `veth*` and `br-*` are
 skipped. The Python call still runs, but only every 15 seconds and only for the
 interface name and VPN state, which rarely change.
+
+---
+
+# Icons
+
+Icons come from the Material Symbols font when it is installed, and from the
+bundled folder otherwise.
+
+```
+sudo pacman -S ttf-material-symbols-variable
+```
+
+It is in Extra, not the AUR, and ships Outlined, Rounded and Sharp as variable
+fonts. `theme.iconFamily` picks the style, `theme.icons` picks the source
+(`auto`, `font`, `images`), and Settings → Appearance → Icons exposes both.
+
+## Why a font
+
+The font draws an icon from a **ligature of its own name**, so `folder_open`
+renders as the folder icon with nothing to resolve on disk. That removes the
+whole per-name file lookup and its cache, scales to any size, and tints by
+setting a text colour rather than running a colorization pass.
+
+Most of our names are already Material's. `IconMap.aliases` translates the ones
+we invented — `media_output` to `speaker`, `wired` to `lan`, `backlight_high` to
+`brightness_high`, and so on.
+
+## What still uses files
+
+Application icons. Those come from `.desktop` entries and are real artwork, so
+they resolve through `DesktopEntries` and `Quickshell.iconPath` as before.
+`IconButton.setIconSource()` is the escape hatch the app bar uses for them.
+
+If the font is missing, `Icon` falls back to the bundled folder and tints through
+`MultiEffect`, so nothing breaks — it just looks as it did before.
+
+
+---
+
+# Bar layout
+
+`bar` in `config.json` describes the whole bar.
+
+```json
+"bar": {
+    "position": "top",
+    "style":    "blocks",
+    "left":     ["workspaces"],
+    "center":   ["appbar"],
+    "right":    ["clock", "date", "separator", "volume",
+                 "network", "bluetooth", "tray", "notifications"]
+}
+```
+
+Settings → Bar edits all of it: position, style, per-zone ordering, moving a
+widget between zones, and a catalogue showing where each widget currently sits.
+
+## Widgets as data
+
+`Objects/Widgets/BarWidget.qml` maps an id to a component, so the zones in
+`MainWindow` are `Repeater`s over those arrays rather than hardcoded markup.
+Adding a widget to the shell means one entry in that map and one in the
+catalogue.
+
+The settings button is deliberately not in the list. The quick panel, power menu
+and settings window are all parented to it, so it stays pinned at the end of the
+right zone.
+
+## Full versus blocks
+
+Full mode does not rebuild the layout. A single `RoundedBlock` is drawn behind
+everything at `z: -1`, and the per-zone blocks drop their fill, border and
+highlight — so widgets keep their exact positions and only the surface beneath
+them changes. Duplicating the zones into a second layout would have meant two
+copies of every widget, including the one that owns the popups.
+
+The blur region follows whichever surface is actually painted: one region in
+full mode, the union of four in blocks mode.
+
+## Bottom placement
+
+Swaps the layer shell anchor and flips every chamfer, and popups position
+through `mainWindow.popupOffset()` so they open upward instead of off screen.

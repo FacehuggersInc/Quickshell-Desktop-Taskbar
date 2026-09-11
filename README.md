@@ -10,15 +10,17 @@ A Hyprland desktop shell built with Quickshell.
 >
 > - **Tooltips** don't always align correctly, particularly inside popups and menus
 > - **System Tray** icons are rendered as-is — coloured icons won't always match the shell's theme
-> - **Workspace switching and window hiding** are imperfect — behaviour can be inconsistent depending on the app
-> - **Widgets are static** — the bar layout is hardcoded in `MainWindow.qml`. There is currently no way to add, remove, or reorder widgets from `config.json` alone
-> - **QoL settings are incomplete** — many things that would be useful to configure from the settings panel are not yet exposed there and require editing the config or source directly
+> - **Blur on popups** needs `blurMode: "compositor"` and Hyprland layer rules; under `protocol` only layer surfaces blur. See `Docs/THEME.md`
+> - **A faint blur edge** can appear at the chamfered corners of bar blocks under `blurMode: "protocol"`
+> - **Workspace swapping between monitors** is unavailable — Hyprland 0.56 has no lua equivalent for `swapactiveworkspaces` or `moveworkspacetomonitor`
+> - **HDR** is not exposed, for the same reason: the colour management syntax has not been verified against a running compositor
+> - **Only the lua config is supported** for reading and writing Hyprland settings. `.conf` files are not read
 
 ---
 
 ## Features
 
-**App Bar** — pinned and active apps with live window tracking, instance counts, and multi-window awareness. Pin apps from right-click or from all installed `.desktop` files (including Flatpak). Drag to reorder pinned apps — order persists across sessions. Icons are resolved automatically from system icon themes, Flatpak export paths, and `/usr/share/pixmaps/`.
+**App Bar** — pinned and active apps with live window tracking, instance dots, and multi-window awareness. Right-click the bar to add an app, or manage them from Settings → Pinned Apps. Drag to reorder pinned apps — order persists across sessions. Icons are resolved automatically from system icon themes, Flatpak export paths, and `/usr/share/pixmaps/`.
 
 **Context Menus** — organised into sections (Launch, Windows, Settings) with sub-menus for jump lists, window management, and masque options. Close individual windows by name, send windows to workspaces, copy commands, toggle launch options.
 
@@ -26,7 +28,7 @@ A Hyprland desktop shell built with Quickshell.
 
 **Masquing** — redirect windows from one app class to appear under a different pinned app's icon. Useful for game launchers, Electron wrappers, or apps that spawn child processes under different class names.
 
-**Gaming Mode** — auto-triggered when a configured game app is detected. The bar hides completely; hovering near the top edge for 1 second reveals a minimal bar with a subtle clock and notification dot. Click to exit. A re-enter button appears on the app bar when paused. Configure per-app from the context menu or toggle manually from Settings.
+**Gaming Mode** — auto-triggered when a configured app is detected. The bar hides completely; hovering the edge for 1 second reveals a minimal bar with a clock and notification dot. Triggers are managed from Settings → Gaming, or from an app's context menu.
 
 **Workspace Overview** — a fullscreen minimap of the desktop. Every monitor is drawn at its real aspect ratio with its windows at their true positions and live previews. Drag windows between monitors, click to focus, middle click to close. Bound to a keybind or opened from the bar.
 
@@ -38,15 +40,21 @@ A Hyprland desktop shell built with Quickshell.
 
 **Display Brightness** — one DDC control for every display, cached and issued in parallel.
 
+**Display Editor** — drag monitors to arrange them, set resolution, refresh rate, scale and rotation. Monitors described by an `hl.monitor` rule are written back into your lua config; the rest are stored by the shell and re-applied at startup.
+
+**Hotkeys & Startup** — read and edit your Hyprland keybinds and startup commands from the settings window.
+
+**File Types** — every mime type on the system, what handles it, and the ability to assign any installed application.
+
+**Packages** — explicitly installed pacman, AUR and flatpak packages with available updates. Nothing privileged runs from the shell; updates and removals are handed to a terminal.
+
 **Theater Mode** — dims non-primary displays for focused viewing.
 
 **Notifications** — toast popups with action buttons, notification panel with history, and unread badge.
 
-**Network** — interface info, VPN status, and live upload/download speed.
-
 **System Tray** — renders tray icons from running applications.
 
-**Wallpaper Cycling** — timed wallpaper rotation with day/night scheduling, per-display random selection, smart cropping for vertical monitors, and optional auto-theming from wallpaper colors.
+**Wallpaper Cycling** — timed rotation with day/night scheduling, per-display random selection, and smart cropping for vertical monitors. The accent colour can follow the wallpaper.
 
 **Theme Engine** — one accent hue, optionally taken from the wallpaper and clamped so it always clears a contrast threshold. Translucent blurred surfaces, light and dark on a schedule.
 
@@ -56,11 +64,13 @@ A Hyprland desktop shell built with Quickshell.
 
 **Dot Matrix Clock** — the time rendered as a lit dot grid, with a week strip date beside it.
 
-**Network Meter** — live upload and download throughput as a rolling dot histogram.
+**Network Meter** — live upload and download throughput as a rolling dot histogram, read from `/proc/net/dev` with no subprocess.
+
+**Network Settings** — interfaces, wi-fi scanning and joining, and saved connections through NetworkManager.
+
+**Bar Layout Editor** — drag widgets between the left, centre and right zones, choose top or bottom, and switch between separate blocks and one continuous bar.
 
 **USB Quick Access** — auto-mount detection with one-click open-in-files.
-
-**Settings Panel** — wallpaper controls, display brightness, theater mode, gaming mode, quick actions, and USB management.
 
 ---
 
@@ -103,9 +113,19 @@ sudo pacman -S ddcutil
 sudo pacman -S udisks2
 ```
 
-**Network — required for the network widget:**
+**Network — required for the network widget and the network settings page:**
 ```bash
 sudo pacman -S networkmanager
+```
+
+**Packages — required for the packages page. `checkupdates` comes from pacman-contrib; an AUR helper and flatpak are both optional:**
+```bash
+sudo pacman -S pacman-contrib
+```
+
+**Icons — the interface icon font:**
+```bash
+sudo pacman -S ttf-material-symbols-variable
 ```
 
 **Notifications — required for toast popups:**
@@ -127,8 +147,9 @@ sudo pacman -S hyprland xdg-desktop-portal-hyprland
 
 **Python packages — required for background operations:**
 ```bash
-pip install rapidfuzz colormath pillow numpy --break-system-packages
+pip install rapidfuzz pillow numpy --break-system-packages
 ```
+`pillow` and `numpy` are only used for wallpaper cropping and colour sampling, and are imported lazily.
 
 > **Install order matters:**
 > 1. Install system packages via `pacman` first
@@ -187,47 +208,29 @@ exec-once = awww-daemon
 exec-once = quickshell
 ```
 
-> **`theme.py`** is now imported lazily, only by `--generatetheme`. Every other `utill.py` call runs without it. It is no longer on the shell's startup path.
+> `theme.py` has been removed. Colour derivation happens in QML.
 
 ---
 
 ## 5. Icons
 
-Icons are hand-picked from [Google Material Icons](https://fonts.google.com/icons) and saved as PNG. They are not always named to match their Material name — some are renamed to fit the context they're used in based on personal preference.
+Interface icons come from the **Material Symbols** font:
 
-Place all icons in the directory set as `iconsPath`. The path must end with a trailing `/`. Required names:
-
-```
-add                 alarm               apps
-audio_adjust        back                backlight_high
-backlight_low
-backlight_off       bluetooth           bluetooth_connected
-bluetooth_disabled  bluetooth_searching brightness
-calendar_add        calendar_edit       calendar_event
-calendar_month      calendar_today      check
-close               copy_content        dark_mode
-delete              download            ethernet
-filter              filter_off          hide
-history             home                light_mode
-lock                masked              masked_add
-media_input         media_output        microphone
-microphone_alert    microphone_mute     music_add
-music_album         music_artist        music_note
-music_note_single   music_off           music_pause
-music_play          music_prev          music_queue
-music_resume        music_skip          notify
-notify_unread       open_app            open_folder
-pin                 refresh             restart
-screenshot          search              settings
-show                stop                sync
-terminal            unpin               upload
-volume_max          volume_med          volume_min
-volume_mute         vpn                 wallpaper
-wifi_max            wifi_med            wifi_min
-wifi_off            wired
+```bash
+sudo pacman -S ttf-material-symbols-variable
 ```
 
-All icons are `.png`.
+It is in the Extra repository, not the AUR. The font renders an icon from a
+ligature of its own name, so there is no per-name file lookup and no icon cache
+to maintain. `Objects/Design/IconMap.qml` translates the handful of names this
+shell invented onto Material's.
+
+Settings → Appearance → Icons switches between Rounded, Outlined and Sharp, and
+can force either the font or the bundled folder. Without the font installed the
+shell falls back to the folder automatically.
+
+Application icons are unaffected — those come from `.desktop` entries and are
+resolved through `DesktopEntries`.
 
 ---
 
@@ -252,14 +255,20 @@ The table below documents what the shell is actually doing in the background. Th
 | `--ddcrefresh` | Forces a ddc re-detect and rewrites `.ddc-cache` |
 | `--getappicons` | Called when an app class name has no cached icon — resolves the icon using a layered lookup: exact name match in icon theme directories and `/usr/share/pixmaps/`, Flatpak export paths, dotted/hyphenated name segmentation (e.g. `org.gnome.Nautilus` → `nautilus`), then fuzzy matching as a last resort (threshold 85). Results are cached in `.icon-path-cache`. The cache auto-invalidates when icon directories change (e.g. a new Flatpak is installed) |
 | `--setappicon` | Called when pinning an app from the installed apps list — resolves the `.desktop` file's `Icon` name to a full path using the same layered lookup as `--getappicons` and writes it to the cache |
-| `--getdesktopapps` | Called each time the "Add App" window opens — parses all `.desktop` files including Flatpak exports. Previously-pinned apps are filtered out using the current launcher list so recently unpinned apps appear immediately |
-| `--getnetworkinfo` | Polls every 1.5s when the network popup is open — samples `/proc/net/dev` twice 0.5s apart to calculate live speeds |
+| `--getnetworkinfo` | Polled every 15s for the interface name and VPN state. Throughput is read from `/proc/net/dev` in QML, not here |
+| `--netdevices` `--netconnections` `--netwifi` | Read NetworkManager state for the network settings page |
+| `--netconnect` `--netdisconnect` `--netforget` `--netradio` `--netwifiscan` | Act on NetworkManager from the network settings page |
+| `--luamonitors` `--luawritemonitor` | Read and edit `hl.monitor` rules in your Hyprland lua config |
+| `--luabinds` `--luawritebind` `--luaaddbind` `--luadeletebind` | Read and edit `hl.bind` entries |
+| `--luastartup` `--luaaddstartup` `--luawritestartup` `--luadeletestartup` | Read and edit the `hyprland.start` block |
+| `--mimetypes` `--mimeset` `--mimeclear` | Read the mime database and write `mimeapps.list` |
+| `--pkglist` `--pkgupdates` `--pkghelper` | List explicitly installed packages and available updates |
 | `--getaudiodevices` | Called when the audio popup opens — lists input and output devices via `wpctl status` |
 | `--getcommandhistory` | Called when the Command History popup opens — reads `~/.bash_history`, `~/.zsh_history` and `~/.local/share/fish/fish_history`. **Filters heavily** — strips sudo, package managers, git, file ops, shell builtins and any single-word command. The intent is app launches and custom scripts only. If a command you expect to see is missing it is almost certainly being filtered. Edit `FILTER_PREFIXES` in `utill.py` to loosen this. |
 | `--randomfile` | Called on each wallpaper cycle — picks one random file per display from the configured folder |
 | `--smartcrop` | Called before setting a wallpaper on a vertical monitor — analyses column variance to find the most visually interesting horizontal region and crops to it. Returns the original path unchanged if the image ratio is already close enough or if variance is too uniform |
 | `--ddcsetbrightness` | Called on slider release — sets brightness on a specific display number via `ddcutil setvcp 10` |
-| `--btstate` | Polls every 2s in the bluetooth widget — returns adapter power, scanning and discoverable state |
+| `--btstate` | Polls every 2s in the bluetooth widget — returns adapter power, scanning and discoverable state, plus the connected device count and name |
 | `--btdevices` | Polls when the bluetooth popup is open — lists paired devices with alias, connection status and battery percentage |
 | `--btscan` | Called when the scan button is pressed — starts a 10s `bluetoothctl` scan in the background |
 | `--btscanresults` | Polls while scanning — returns discovered devices not already paired |
@@ -277,21 +286,61 @@ The table below documents what the shell is actually doing in the background. Th
 **Python packages required** by this file:
 
 - `rapidfuzz` — fuzzy icon matching
-- `pillow` + `numpy` — smart crop saliency detection
-- `colormath` — theme generation
+- `pillow` + `numpy` — smart crop saliency detection, imported lazily so only wallpaper cropping pays for them
 
 If any package is missing the affected features will silently fail or return empty results.
 
+> Application icons are still resolved by this file. Interface icons are not —
+> those come from the Material Symbols font and need no lookup or cache.
+
 ---
 
-## 7. Configuration
+## 7. Settings
+
+Almost everything is editable from the settings window — the gear on the bar
+opens a quick panel, and **All Settings** opens the full window.
+
+| Page | Covers |
+|---|---|
+| Appearance | theme mode, accent, glass, blur mode, icons, fonts |
+| Wallpaper | cycling, folders, interval, dark hours, cropping |
+| Bar | position, full or blocks, metrics, drag and drop widget layout, clock and network styles |
+| Displays | arrangement, resolution, refresh, scale, rotation, brightness, theater |
+| Hotkeys | reads and writes `hl.bind` entries in your Hyprland lua config |
+| Startup Apps | reads and writes the `hyprland.start` block |
+| Gaming | gaming mode and the app triggers that turn it on |
+| Pinned Apps | reorder and unpin, plus the app picker |
+| Network | interfaces, wi-fi, saved connections, via NetworkManager |
+| Bluetooth | adapter, scanning, pair and connect |
+| Audio | output and input devices, media commands |
+| File Types | every mime type, its handler, and what claims it |
+| Packages | explicitly installed packages, updates, terminal handoff |
+| Commands | the command map |
+| Debug | live state of every subsystem |
+| Advanced | utility script paths, compositor toggles, config files |
+
+### Writing to your Hyprland config
+
+The Displays, Hotkeys and Startup pages edit `~/.config/hypr/*.lua` directly.
+Edits are surgical — only the value being changed is touched, comments, spacing
+and keys the shell does not know about are preserved, your `mainMod` style is
+kept, and every write takes a timestamped backup (five are retained). An edit
+that would unbalance the file is refused before anything is written.
+
+`.conf` files are not read or written. This shell targets the lua config.
+
+---
+
+## 8. Configuration
 
 If you have not yet created `config.json` see [Installation](#4-installation) above. All available keys and what they do:
 
 ```json
 {
-    "displays":            ["DP-1", "HDMI-A-1"], // auto-populated from Hyprland on startup
-    "primaryDisplayIndex": 0,                    // auto-set to focused monitor on first run — change in Display settings
+    "primaryDisplay": "DP-1",                    // monitor name — set in Display settings
+    "displays": {                                // written by the display editor
+        "layout": {}                             // per monitor mode, position, scale, rotation
+    },
     "wallpapers": {
         "cycling":            true,              // set false to skip all wallpaper handling
         "day":        "/path/to/day/",           // required if cycling — trailing slash needed
@@ -301,7 +350,6 @@ If you have not yet created `config.json` see [Installation](#4-installation) ab
         "smartCrop":      false,                 // auto-crop for vertical monitors
         "portraitFolder": "",                    // optional — portrait wallpapers preferred on vertical monitors
         "wallpaperMode":  0,                     // 0=auto, 1=force day, 2=force night
-        "autoTheme":      false,                 // generate theme from current wallpaper
         "darkModeHours": {
             "at":     21,                        // hour to switch to night (24h)
             "before": 6                          // hour to switch to day (24h)
@@ -382,7 +430,7 @@ If you have not yet created `config.json` see [Installation](#4-installation) ab
     "forceDarkMode":   false,
     "theater": {
         "enabled":        false,         // reset to false on startup automatically
-        "primaryDisplay": null,          // index into displays — defaults to primaryDisplayIndex if null
+        // theater dims everything except the monitor named by primaryDisplay above
         "dimBrightness":  10,            // brightness % for non-primary displays in theater mode (0-50)
         "wallpaper":      ""             // path to wallpaper set on non-primary displays when active
     },
@@ -439,7 +487,7 @@ Any `{v-key}` that doesn't match a key in `variables` is left as-is.
 
 ---
 
-## 8. Theme
+## 9. Theme
 
 Theming is handled by the `Theme` singleton in `Objects/Theme/Theme.qml`. The
 `theme` block in `config.json` holds only authored values:
@@ -476,7 +524,7 @@ compositor fallback.
 
 ---
 
-## 9. Launchers & Options
+## 10. Launchers & Options
 
 Launchers are pinned apps in the app bar. Each launcher maps a window class name to a launch command. All launcher management — window matching, active state, instance tracking, options, masques — is handled entirely by `AppBarWidget`.
 
@@ -529,7 +577,7 @@ In the example above, right-clicking VS Code shows three entries:
 
 ---
 
-## 10. Pinning Apps
+## 11. Pinning Apps
 
 The easiest way to pin an app is to simply open it, then **right-click its icon in the app bar** and select **Pin**. The shell will capture the app's class name, command, and any launch arguments automatically.
 
@@ -551,7 +599,7 @@ Items with a **›** arrow open a sub-menu. Click the **‹ Back** header to ret
 
 ---
 
-## 11. Masquing
+## 12. Masquing
 
 Masquing lets you make one app's windows appear under a different pinned app's icon. This is useful when an app spawns windows under a class name that doesn't match its launcher — for example a game launcher that opens the actual game under a completely different class, or an Electron app that reports a generic class name.
 
@@ -569,13 +617,13 @@ You can also set a masque upfront when adding a custom app via the **Custom App*
 
 ---
 
-## 12. Gaming Mode
+## 13. Gaming Mode
 
 Gaming mode hides the bar to get out of the way during fullscreen or borderless-windowed games. When active, the bar shrinks to an invisible 2px sliver. Hovering your mouse near the top edge of the screen for 1 second reveals a minimal bar with a subtle clock and notification dot — click it to exit gaming mode.
 
-**Manual toggle** — open the Settings panel and flip the Gaming Mode switch. This works regardless of whether a gaming app is running.
+**Manual toggle** — Settings → Gaming, or the Gaming tile in the quick panel. This works regardless of whether a gaming app is running.
 
-**Auto-trigger** — right-click any app in the app bar → **Gaming App: ON**. When that app's window class is detected as active, gaming mode enables automatically. When the app closes, gaming mode disables. Multiple apps can be added to the trigger list.
+**Auto-trigger** — Settings → Gaming lists the trigger classes and lets you add one by name or pick from what is running. An app's context menu still has **Gaming App: ON** as a shortcut. When a trigger's window class is detected, gaming mode enables automatically, and disables when it closes.
 
 **Masqued games** — if a game is masqued under another app (e.g. `HytaleClient` masqued under `HytaleLauncher`), the gaming trigger checks process-level class names, not just app bar entries. Toggle gaming mode for masqued apps via the parent's context menu → **Masque** sub-menu → **ClassName Gaming: ON/OFF**.
 
@@ -583,9 +631,9 @@ Gaming mode hides the bar to get out of the way during fullscreen or borderless-
 - A **re-enter** button (primary color) — click to go back into gaming mode, clearing any blocks
 - An **early exit** button (stop icon) — click to permanently exit gaming mode for this session. The game is blocked from re-triggering gaming mode until it closes. Once the game closes, the block is cleared and the next launch will trigger gaming mode normally.
 
-If gaming mode was activated from the Settings panel (no game running), clicking the revealed bar exits fully — no re-enter button appears.
+If gaming mode was activated manually with no game running, clicking the revealed bar exits fully — no re-enter button appears.
 
-If gaming mode is re-enabled from Settings while a blocked game is still running, the block is cleared and gaming mode resumes as if the game triggered it fresh.
+If gaming mode is re-enabled while a blocked game is still running, the block is cleared and gaming mode resumes as if the game triggered it fresh.
 
 **Config:**
 
@@ -597,7 +645,7 @@ If gaming mode is re-enabled from Settings while a blocked game is still running
 
 ---
 
-## 13. Commands & Paths
+## 14. Commands & Paths
 
 All external commands the shell executes are defined in `config.json` under the `commands` key. Each command is a string that supports two kinds of substitution:
 
@@ -646,7 +694,7 @@ When `path` is empty (default), the shell auto-resolves to `./Scripts/utill.py` 
 
 ---
 
-## 14. Timers & Reactivity
+## 15. Timers & Reactivity
 
 Most of the shell is event driven now. Hyprland state comes from the event
 socket, brightness is read once at startup, and throughput is differenced from
@@ -663,6 +711,8 @@ socket, brightness is read once at startup, and throughput is differenced from
 | Media display refresh | 300ms | `Objects/Window/AudioManagementPopup.qml` | Only while the popup is open |
 | Notification toast | 6000ms | `Objects/Window/NotificationPopup.qml` | Auto dismiss |
 | Bluetooth devices | 3000ms | `Objects/Window/BluetoothPopup.qml` | Only while the popup is open |
+| Bluetooth state | 4000ms | `Objects/Window/QuickSettingsPopup.qml` | Only while the panel is open |
+| Display layout restore | once | `Objects/Systems/DisplaySystem.qml` | Re-applies stored monitor settings 1.5s after startup |
 | USB drives | 4000ms | `Objects/Window/QuickSettingsPopup.qml` | Only while the panel is open |
 | Brightness write throttle | 220ms | `Objects/Systems/BrightnessSystem.qml` | Rate limits ddc writes while dragging |
 
@@ -675,13 +725,17 @@ socket, brightness is read once at startup, and throughput is differenced from
 | Workspace list, 2000ms | python + `hyprctl` | Hyprland event socket |
 | Network info, 1500ms | python, and each call slept 500ms to take a second sample | `/proc/net/dev` read in QML |
 | Clock, 1000ms | python, purely to format a date string | Qt |
+| Notification badge, 500ms | polled the count because its change signals were never connected | A bindable property |
+| Icon lookups | a cached per-name file search | A font ligature, no lookup at all |
 | Brightness, on every panel open | `ddcutil detect` plus a serial `getvcp` per display | Cached list, parallel reads, once at startup |
 
 ---
 
-## 15. First Run
+## 16. First Run
 
-On the first launch `.icon-path-cache` does not exist yet. `AppBarWidget` will call `--getappicons` which walks your icon theme directories, Flatpak export paths, and `/usr/share/pixmaps/` — recording each icon's name and path. This is a one-time operation and may take a few seconds. Subsequent launches read from the cache and are fast. The cache stores only class name → icon path mappings, not icon image data.
+On the first launch `.icon-path-cache` does not exist yet. The app bar calls `--getappicons`, which walks your icon theme directories, Flatpak export paths, and `/usr/share/pixmaps/` — recording each icon's name and path. This is a one-time operation and may take a few seconds. Subsequent launches read from the cache.
+
+This applies to **application** icons only. Interface icons come from the Material Symbols font and are never looked up or cached.
 
 The cache is stored at `~/.config/quickshell/.icon-path-cache`.
 
@@ -689,16 +743,26 @@ The cache auto-invalidates when the icon directories change (e.g. a new Flatpak 
 
 ---
 
-## 16. Run
+## 17. Run
 
 ```bash
 quickshell
 ```
 
-Add to `~/.config/hypr/hyprland.conf` to start automatically:
+Add to your Hyprland config to start automatically. On a lua config:
+```lua
+hl.on("hyprland.start", function()
+    hl.exec_cmd("awww-daemon")
+    hl.exec_cmd("quickshell")
+end)
+```
+
+On the older hyprlang config:
 ```
 exec-once = awww-daemon
 exec-once = quickshell
 ```
 
-> `awww-daemon` must be listed **before** `quickshell` so the wallpaper daemon is ready when the shell starts.
+> `awww-daemon` must come **before** `quickshell` so the wallpaper daemon is ready
+> when the shell starts. Once running, Settings → Startup Apps edits this block
+> for you.

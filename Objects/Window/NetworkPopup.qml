@@ -19,7 +19,7 @@ PopupWindow {
 
     anchor.window: mainWindow
     anchor.rect.x: 0
-    anchor.rect.y: mainWindow.height + 5
+    anchor.rect.y: mainWindow.popupOffset(implicitHeight)
 
     property int panelWidth:  320
     property int panelHeight: 220
@@ -38,6 +38,20 @@ PopupWindow {
     MouseArea { anchors.fill: parent; z: -1; onClicked: networkPopup.forceClose() }
 
     property bool isClosing: false
+
+    // ## Back
+    // Set when the quick panel opened this, so there is a way to return
+
+    property var backTarget: null
+
+    function goBack() {
+        var target = networkPopup.backTarget
+        networkPopup.backTarget = null
+        networkPopup.forceClose()
+        if (target && mainWindow.settingsAnchor)
+            target.forceOpen(mainWindow.settingsAnchor)
+    }
+
 
     // Parsed network state
     property string netInterface: "..."
@@ -100,6 +114,40 @@ PopupWindow {
 
     Rectangle {
         id: background
+
+        // Back to quick settings
+        Rectangle {
+            visible: networkPopup.backTarget !== null
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.margins: 8
+            width: backLabel.implicitWidth + 22
+            height: 24
+            radius: Theme.radiusSmall
+            z: 50
+            color: backArea.containsMouse ? Theme.alpha(Theme.accent, 0.24)
+                                          : Theme.alpha(Theme.textBase, 0.12)
+            border.width: Theme.borderWidth
+            border.color: Theme.border
+
+            Text {
+                id: backLabel
+                anchors.centerIn: parent
+                text: "\u2190 Quick Settings"
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: 10
+                font.weight: 600
+            }
+
+            MouseArea {
+                id: backArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: networkPopup.goBack()
+            }
+        }
         width: panelWidth
         height: panelHeight
         radius: 15
@@ -124,6 +172,8 @@ PopupWindow {
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 16
+            // Pushed clear of the back control rather than sitting under it
+            anchors.topMargin: networkPopup.backTarget !== null ? 42 : 16
             spacing: 12
 
             // ── Connection type + interface ───────────────────────
@@ -208,13 +258,12 @@ PopupWindow {
                 // Download
                 RowLayout {
                     spacing: 6
-                    Image {
-                        source: root.iconSource("download")
-                        width: 16; height: 16
-                        sourceSize.width: 16; sourceSize.height: 16
-                        fillMode: Image.PreserveAspectFit
-                        opacity: 0.6
-                    }
+                    Icon {
+    iconName: "download"
+    iconSize: 16
+    color: Theme.accentIcon
+    opacity: 0.6
+}
                     ColumnLayout {
                         spacing: 0
                         Text {
@@ -239,13 +288,12 @@ PopupWindow {
                 // Upload
                 RowLayout {
                     spacing: 6
-                    Image {
-                        source: root.iconSource("upload")
-                        width: 16; height: 16
-                        sourceSize.width: 16; sourceSize.height: 16
-                        fillMode: Image.PreserveAspectFit
-                        opacity: 0.6
-                    }
+                    Icon {
+    iconName: "upload"
+    iconSize: 16
+    color: Theme.accentIcon
+    opacity: 0.6
+}
                     ColumnLayout {
                         spacing: 0
                         Text {
@@ -293,6 +341,8 @@ PopupWindow {
     }
 
     function toggle(widget) {
+        // Opened from the bar, so there is nothing to go back to
+        networkPopup.backTarget = null
         if (!networkPopup.visible || isClosing) forceOpen(widget)
         else forceClose()
     }

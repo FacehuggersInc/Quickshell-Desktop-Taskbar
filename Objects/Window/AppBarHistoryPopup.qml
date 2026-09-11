@@ -19,7 +19,7 @@ PopupWindow {
 
     anchor.window: mainWindow
     anchor.rect.x: 0
-    anchor.rect.y: mainWindow.height + 5
+    anchor.rect.y: mainWindow.popupOffset(implicitHeight)
 
     property int panelWidth: 420
     property int panelHeight: Math.min(Screen.height - mainWindow.height - 20, 500)
@@ -88,7 +88,7 @@ PopupWindow {
         width: panelWidth
         height: panelHeight
         radius: 15
-        color: root.theme.background
+        color: Theme.panelScrim
         border.width: Theme.borderWidth
         border.color: Theme.border
         opacity: 0
@@ -114,8 +114,8 @@ PopupWindow {
                 Layout.fillWidth: true
                 Text {
                     text: "Command History"
-                    color: root.theme.text
-                    font.family: root.settings.fontFamily
+                    color: Theme.text
+                    font.family: Theme.fontFamily
                     font.weight: 700
                     font.pixelSize: 16
                     Layout.fillWidth: true
@@ -123,7 +123,7 @@ PopupWindow {
                 IconButton {
                     iconName: "close"
                     iconSize: 16
-                    color: root.theme.text
+                    color: Theme.text
                     tooltipText: "Close"
                     onClicked: historyPopup.forceClose()
                 }
@@ -134,26 +134,26 @@ PopupWindow {
                 Layout.fillWidth: true
                 height: 34
                 radius: 8
-                color: root.theme.surface
+                color: Theme.alpha(Theme.textBase, 0.10)
 
                 RowLayout {
                     anchors.fill: parent
                     anchors.margins: 8
                     spacing: 6
 
-                    Image {
-                        source: root.iconSource("search")
-                        width: 16; height: 16
-                        fillMode: Image.PreserveAspectFit
-                        opacity: 0.5
-                    }
+                    Icon {
+    iconName: "search"
+    iconSize: 16
+    color: Theme.accentIcon
+    opacity: 0.5
+}
 
                     TextField {
                         id: searchField
                         Layout.fillWidth: true
                         placeholderText: "Search commands..."
-                        color: root.theme.text
-                        font.family: root.settings.fontFamily
+                        color: Theme.text
+                        font.family: Theme.fontFamily
                         font.pixelSize: 13
                         background: Item {}
                         onTextChanged: historyPopup.searchQuery = text
@@ -167,9 +167,9 @@ PopupWindow {
                 text: historyPopup.commands.length === 0
                     ? "No history found"
                     : "No matches"
-                color: root.theme.text
+                color: Theme.text
                 opacity: 0.4
-                font.family: root.settings.fontFamily
+                font.family: Theme.fontFamily
                 font.pixelSize: 13
                 Layout.alignment: Qt.AlignHCenter
             }
@@ -198,17 +198,16 @@ PopupWindow {
 
                             contentItem: RowLayout {
                                 spacing: 8
-                                Image {
-                                    source: root.iconSource("terminal")
-                                    width: 16; height: 16
-                                    sourceSize.width: 16; sourceSize.height: 16
-                                    fillMode: Image.PreserveAspectFit
-                                    opacity: 0.5
-                                }
+                                Icon {
+    iconName: "terminal"
+    iconSize: 16
+    color: Theme.accentIcon
+    opacity: 0.5
+}
                                 Text {
                                     text: modelData
-                                    color: root.theme.text
-                                    font.family: root.settings.fontFamily
+                                    color: Theme.text
+                                    font.family: Theme.fontFamily
                                     font.pixelSize: 13
                                     elide: Text.ElideRight
                                     Layout.fillWidth: true
@@ -216,7 +215,7 @@ PopupWindow {
                             }
                             background: Rectangle {
                                 radius: 6
-                                color: cmdHov.hovered ? root.theme.primary : "transparent"
+                                color: cmdHov.hovered ? Theme.accent : "transparent"
                                 opacity: cmdHov.hovered ? 0.18 : 1
                             }
                             HoverHandler { id: cmdHov; cursorShape: Qt.PointingHandCursor }

@@ -21,7 +21,7 @@ PopupWindow {
 
     anchor.window: mainWindow
     anchor.rect.x: 0
-    anchor.rect.y: mainWindow.height + 5
+    anchor.rect.y: mainWindow.popupOffset(implicitHeight)
 
     property int panelWidth: 420
     property int panelHeight: Math.min(Screen.height - mainWindow.height - 20, 680)
@@ -38,6 +38,20 @@ PopupWindow {
         (Theme.glass && Theme.blurMode === "protocol") ? glassBlurRegion : null
 
     property bool isClosing: false
+
+    // ## Back
+    // Set when the quick panel opened this, so there is a way to return
+
+    property var backTarget: null
+
+    function goBack() {
+        var target = bluetoothPopup.backTarget
+        bluetoothPopup.backTarget = null
+        bluetoothPopup.forceClose()
+        if (target && mainWindow.settingsAnchor)
+            target.forceOpen(mainWindow.settingsAnchor)
+    }
+
     property bool powered: false
     property bool scanning: false
     property var pairedDevices: []
@@ -249,6 +263,40 @@ PopupWindow {
     // ── Background ────────────────────────────────────────────────
     Rectangle {
         id: background
+
+        // Back to quick settings
+        Rectangle {
+            visible: bluetoothPopup.backTarget !== null
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.margins: 8
+            width: backLabel.implicitWidth + 22
+            height: 24
+            radius: Theme.radiusSmall
+            z: 50
+            color: backArea.containsMouse ? Theme.alpha(Theme.accent, 0.24)
+                                          : Theme.alpha(Theme.textBase, 0.12)
+            border.width: Theme.borderWidth
+            border.color: Theme.border
+
+            Text {
+                id: backLabel
+                anchors.centerIn: parent
+                text: "\u2190 Quick Settings"
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: 10
+                font.weight: 600
+            }
+
+            MouseArea {
+                id: backArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: bluetoothPopup.goBack()
+            }
+        }
         width: panelWidth
         height: panelHeight
         radius: 15
@@ -271,6 +319,8 @@ PopupWindow {
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 12
+            // Pushed clear of the back control rather than sitting under it
+            anchors.topMargin: bluetoothPopup.backTarget !== null ? 38 : 12
             spacing: 8
 
             // ── Header ────────────────────────────────────────────
@@ -582,6 +632,8 @@ PopupWindow {
     }
 
     function toggle(widget) {
+        // Opened from the bar, so there is nothing to go back to
+        bluetoothPopup.backTarget = null
         if (!bluetoothPopup.visible || isClosing) forceOpen(widget)
         else forceClose()
     }

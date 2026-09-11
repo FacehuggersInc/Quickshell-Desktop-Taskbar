@@ -9,7 +9,6 @@ Item {
     property string iconName: ""
     property string label: ""
     property string description: ""
-    property bool enabled: true
 
     // Set when the control sits under the label rather than beside it
     property bool stacked: false

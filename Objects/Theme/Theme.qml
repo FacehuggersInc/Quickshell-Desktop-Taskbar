@@ -68,6 +68,10 @@ QtObject {
 
     readonly property color bg: darkMode ? "#0d0f12" : "#f4f6f8"
     readonly property color surface: scrim
+    // Fully opaque. A dropdown opening inside an already translucent panel has
+    // nothing behind it to blur, so stacking two scrims just makes it unreadable.
+    readonly property color menuSurface: composite(panelScrim, bg)
+
     readonly property color surfaceRaised: darkMode
         ? Qt.rgba(1, 1, 1, glass ? 0.06 : 0.10)
         : Qt.rgba(0, 0, 0, glass ? 0.05 : 0.07)

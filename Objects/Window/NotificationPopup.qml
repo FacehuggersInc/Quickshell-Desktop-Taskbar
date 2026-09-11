@@ -14,7 +14,7 @@ PopupWindow {
     id: popup
     anchor.window: mainWindow
     anchor.rect.x: 0
-    anchor.rect.y: mainWindow.height
+    anchor.rect.y: mainWindow.popupOffset(implicitHeight)
     implicitWidth: 420
     implicitHeight: display.implicitHeight > 0 ? display.implicitHeight : 80
     color: "transparent"

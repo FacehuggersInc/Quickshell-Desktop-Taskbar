@@ -24,7 +24,7 @@ PopupWindow {
 
     anchor.window: mainWindow
     anchor.rect.x: 0
-    anchor.rect.y: mainWindow.height + 5
+    anchor.rect.y: mainWindow.popupOffset(implicitHeight)
 
     property int panelWidth: 500
     property int panelHeight: Math.min(Screen.height - mainWindow.height - 20, 480)
@@ -48,6 +48,33 @@ PopupWindow {
     }
 
     property bool isClosing: false
+
+    // Previously reached through VolumeWidget by scope, which stopped working
+    // when this popup moved out of it
+    function getStyleFromPercentage(str) {
+        var num = parseInt(str)
+        if (num >= 60)
+            return [Theme.danger, "volume_max", num]
+        if (num >= 50)
+            return [Theme.accentIcon, "volume_max", num]
+        if (num >= 20)
+            return [Theme.accentIcon, "volume_med", num]
+        return [Theme.textDim, "volume_min", num]
+    }
+
+    // ## Back
+    // Set when the quick panel opened this, so there is a way to return
+
+    property var backTarget: null
+
+    function goBack() {
+        var target = volumeSettingsPopup.backTarget
+        volumeSettingsPopup.backTarget = null
+        volumeSettingsPopup.forceClose()
+        if (target && mainWindow.settingsAnchor)
+            target.forceOpen(mainWindow.settingsAnchor)
+    }
+
 
     PropertyAnimation {
         id: alphaAnim
@@ -220,6 +247,40 @@ PopupWindow {
     // ── Background ────────────────────────────────────────────────
     Rectangle {
         id: background
+
+        // Back to quick settings
+        Rectangle {
+            visible: volumeSettingsPopup.backTarget !== null
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.margins: 8
+            width: backLabel.implicitWidth + 22
+            height: 24
+            radius: Theme.radiusSmall
+            z: 50
+            color: backArea.containsMouse ? Theme.alpha(Theme.accent, 0.24)
+                                          : Theme.alpha(Theme.textBase, 0.12)
+            border.width: Theme.borderWidth
+            border.color: Theme.border
+
+            Text {
+                id: backLabel
+                anchors.centerIn: parent
+                text: "\u2190 Quick Settings"
+                color: Theme.text
+                font.family: Theme.fontFamily
+                font.pixelSize: 10
+                font.weight: 600
+            }
+
+            MouseArea {
+                id: backArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: volumeSettingsPopup.goBack()
+            }
+        }
         width: panelWidth
         height: panelHeight
         radius: 15
@@ -249,6 +310,8 @@ PopupWindow {
         ScrollView {
             anchors.fill: parent
             anchors.margins: 12
+            // Pushed clear of the back control rather than sitting under it
+            anchors.topMargin: volumeSettingsPopup.backTarget !== null ? 38 : 12
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
             ScrollBar.vertical.policy: ScrollBar.AsNeeded
             contentWidth: panelWidth - 24
@@ -282,7 +345,7 @@ PopupWindow {
 
                     IconButton {
                         iconName: "music_prev"
-                        iconSize: 50
+                        iconSize: 24
                         tooltipText: "Previous"
                         color: root.theme.primary
                         radius: 8
@@ -296,7 +359,7 @@ PopupWindow {
                     IconButton {
                         id: playPauseButton
                         iconName: "music_pause"
-                        iconSize: 50
+                        iconSize: 24
                         tooltipText: "Play/Pause"
                         color: root.theme.primary
                         radius: 8
@@ -309,7 +372,7 @@ PopupWindow {
                     }
                     IconButton {
                         iconName: "music_skip"
-                        iconSize: 50
+                        iconSize: 24
                         tooltipText: "Skip"
                         color: root.theme.primary
                         radius: 8
@@ -334,7 +397,7 @@ PopupWindow {
                     IconButton {
                         id: volumeSliderIcon
                         iconName: "volume_min"
-                        iconSize: 45
+                        iconSize: 20
                         tooltipText: ""
                     }
                     CustomSlider {
@@ -361,7 +424,7 @@ PopupWindow {
                     IconButton {
                         id: micSliderIcon
                         iconName: "microphone_alert"
-                        iconSize: 45
+                        iconSize: 20
                         tooltipText: ""
                         onClicked: volumeWidget.toggleMicMute()
                     }
@@ -457,6 +520,8 @@ PopupWindow {
     }
 
     function toggle(widget) {
+        // Opened from the bar, so there is nothing to go back to
+        volumeSettingsPopup.backTarget = null
         if (!volumeSettingsPopup.visible || isClosing) forceOpen(widget)
         else forceClose()
     }

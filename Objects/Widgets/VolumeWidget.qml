@@ -10,7 +10,13 @@ import qs.Objects.Window
 
 RowLayout{
     id: volumeWidget
+    Component.onCompleted: root.volumeWidget = volumeWidget
     property var volumeState
+
+    // Read by the quick panel, which should not have to open the popup to learn
+    // what the volume is
+    property int volumeLevel: 0
+    property bool volumeMuted: false
     spacing: 0
 
     function getStyleFromPercentage(str){
@@ -102,6 +108,9 @@ RowLayout{
                     var volumeActive = parts[1]
 
                     //Volume Percentage / Color
+                    volumeWidget.volumeLevel = parseInt(parts[0].replace("%", "")) || 0
+                    volumeWidget.volumeMuted = !volumeActive.includes("on")
+
                     if (volumeActive.includes("on")){
                         var style = getStyleFromPercentage(parts[0].replace("%", ""))
                         volumeButton.setColor(style[0])
@@ -117,16 +126,14 @@ RowLayout{
       
                     micButton.setState(parts[3])
 
-                    popup.updateSliderInfo(true)
+                    if (root.audioPopup) root.audioPopup.updateSliderInfo(true)
                 }
             }
         }
 
-        AudioManagementPopup{
-            id: popup
+        onClicked: {
+            if (root.audioPopup) root.audioPopup.toggle(volumeWidget)
         }
-        
-        onClicked: popup.toggle(volumeWidget)
 
     }
 }

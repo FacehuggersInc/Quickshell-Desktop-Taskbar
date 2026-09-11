@@ -10,7 +10,6 @@ Rectangle {
     property string iconName: ""
     // neutral | accent | danger
     property string tone: "neutral"
-    property bool enabled: true
     property bool busy: false
     signal activated()
 
@@ -67,7 +66,7 @@ Rectangle {
         id: area
         anchors.fill: parent
         hoverEnabled: true
-        enabled: button.enabled && !button.busy
+        enabled: !button.busy
         cursorShape: Qt.PointingHandCursor
         onClicked: button.activated()
     }

@@ -166,6 +166,16 @@ PanelWindow {
 
     Rectangle {
         id: card
+
+        // Swallows clicks so empty space inside the card does not reach the
+        // dismiss area behind it
+        MouseArea {
+            anchors.fill: parent
+            z: -1
+            acceptedButtons: Qt.AllButtons
+            onClicked: {}
+            onPressed: {}
+        }
         anchors.centerIn: parent
         width: Math.min(parent.width - 100, column.implicitWidth + 44)
         height: column.implicitHeight + 44

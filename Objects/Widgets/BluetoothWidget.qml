@@ -17,10 +17,8 @@ IconButton {
 
     property bool powered: false
     property int connectedCount: 0
+    property string connectedName: ""
 
-    BluetoothPopup {
-        id: bluetoothPopup
-    }
 
     Timer {
         interval: 3000
@@ -42,6 +40,8 @@ IconButton {
                     if (kv.length >= 2) obj[kv[0]] = kv.slice(1).join(":")
                 })
                 bluetoothWidget.powered = obj["powered"] === "yes"
+                bluetoothWidget.connectedCount = parseInt(obj["connected"] || "0")
+                bluetoothWidget.connectedName = obj["device"] || ""
                 bluetoothWidget.setIcon(bluetoothWidget.powered ? "bluetooth" : "bluetooth_disabled")
                 bluetoothWidget.setColor(bluetoothWidget.powered ? root.theme.primary : root.theme.secondary)
                 bluetoothWidget.tooltipText = bluetoothWidget.powered
@@ -55,7 +55,12 @@ IconButton {
         if (!stateProc.running) stateProc.running = true
     }
 
-    Component.onCompleted: updateState()
+    Component.onCompleted: {
+        root.bluetoothWidget = bluetoothWidget
+        updateState()
+    }
 
-    onClicked: bluetoothPopup.toggle(bluetoothWidget)
+    onClicked: {
+        if (root.bluetoothPopup) root.bluetoothPopup.toggle(bluetoothWidget)
+    }
 }

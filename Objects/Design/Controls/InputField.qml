@@ -8,9 +8,14 @@ Item {
 
     property string text: ""
     property string placeholder: ""
-    property bool enabled: true
     property bool invalid: false
+    readonly property alias hasFocus: field.activeFocus
     signal committed(string value)
+
+    // Enter, as distinct from committed() which also fires on focus loss
+    signal accepted(string value)
+
+    function focusInput() { field.forceActiveFocus() }
 
     implicitWidth: 200
     implicitHeight: Theme.controlHeight
@@ -33,10 +38,9 @@ Item {
         anchors.leftMargin: 8
         anchors.rightMargin: 8
 
-        text: control.text
+        Component.onCompleted: text = control.text
         placeholderText: control.placeholder
-        enabled: control.enabled
-        color: Theme.text
+                color: Theme.text
         placeholderTextColor: Theme.textMute
         font.family: Theme.fontFamily
         font.pixelSize: Theme.valueSize
@@ -44,9 +48,19 @@ Item {
         selectByMouse: true
         background: null
 
-        onEditingFinished: {
-            control.text = text
-            control.committed(text)
+        // Live, so search boxes filter as you type. committed() still fires on
+        // enter or focus loss for fields that write to config.
+        onTextChanged: control.text = text
+        onEditingFinished: control.committed(text)
+        onAccepted: control.accepted(text)
+
+        // External changes push in without fighting the live binding above
+        Connections {
+            target: control
+            function onTextChanged() {
+                if (!field.activeFocus && field.text !== control.text)
+                    field.text = control.text
+            }
         }
     }
 }

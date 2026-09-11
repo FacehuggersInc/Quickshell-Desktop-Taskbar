@@ -135,7 +135,6 @@ Item {
         onTriggered: { if (!infoProc.running) infoProc.running = true }
     }
 
-    NetworkPopup { id: networkPopup }
 
     RowLayout {
         id: row
@@ -229,6 +228,8 @@ Item {
     MouseArea {
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
-        onClicked: networkPopup.toggle(net)
+        onClicked: {
+            if (root.networkPopup) root.networkPopup.toggle(net)
+        }
     }
 }

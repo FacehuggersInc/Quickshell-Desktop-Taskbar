@@ -47,17 +47,18 @@ Item {
                 Repeater {
                     model: 7
 
-                    delegate: Rectangle {
+                    delegate: Text {
                         required property int index
 
                         readonly property bool today: index === dateWidget.weekday
 
-                        width: today ? 9 : 5
-                        height: 5
-                        radius: 2.5
-                        color: today ? Theme.accent : Theme.alpha(Theme.textBase, 0.22)
+                        text: dateWidget.dayLetters[index]
+                        color: today ? Theme.accentText
+                                     : Theme.alpha(Theme.textBase, 0.35)
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 11
+                        font.weight: today ? 700 : 600
 
-                        Behavior on width { NumberAnimation { duration: Theme.durNormal } }
                         Behavior on color { ColorAnimation { duration: Theme.durNormal } }
                     }
                 }

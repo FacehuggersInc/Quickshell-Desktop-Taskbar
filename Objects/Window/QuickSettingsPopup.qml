@@ -15,7 +15,7 @@ PopupWindow {
     id: quickPanel
 
     anchor.window: mainWindow
-    anchor.rect.y: mainWindow.height + 5
+    anchor.rect.y: mainWindow.popupOffset(implicitHeight)
     implicitWidth: 400
     implicitHeight: Math.min(760, content.implicitHeight + 28)
     color: "transparent"
@@ -28,6 +28,87 @@ PopupWindow {
         (Theme.glass && Theme.blurMode === "protocol") ? glassBlurRegion : null
 
     property bool isClosing: false
+
+    // ## Summaries
+    // Read from the same systems the panels use, so nothing is polled twice
+
+    readonly property string audioSummary: {
+        var level = root.volumeWidget
+            ? (root.volumeWidget.volumeMuted ? "Muted"
+                                             : root.volumeWidget.volumeLevel + "%")
+            : ""
+        var device = root.audioPopup ? root.audioPopup.outputLabel : ""
+
+        if (level === "" && device === "")
+            return "Unavailable"
+        if (device === "")
+            return level
+        if (level === "")
+            return device
+        return level + "  ·  " + device
+    }
+
+    readonly property string networkSummary: {
+        if (!root.networkPopup)
+            return "Unavailable"
+        var vpn = root.networkPopup.netVpn
+        if (vpn && vpn !== "no" && vpn !== "")
+            return "VPN: " + vpn
+        var name = root.networkPopup.netInterface
+        return name && name !== "" ? name : "Disconnected"
+    }
+
+    // Read directly while the panel is open. Depending on a reference published
+    // by another widget meant one missing assignment showed as "Unavailable".
+    property bool btPowered: false
+    property int btConnected: 0
+    property string btDevice: ""
+    property bool btRead: false
+
+    Process {
+        id: btStateProc
+        command: root.newUtill(["--btstate"])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var text = this.text.trim()
+                quickPanel.btRead = true
+                if (!text)
+                    return
+                var obj = ({})
+                text.split(",").forEach(function(pair) {
+                    var kv = pair.split(":")
+                    if (kv.length >= 2) obj[kv[0]] = kv.slice(1).join(":")
+                })
+                quickPanel.btPowered = obj["powered"] === "yes"
+                quickPanel.btConnected = parseInt(obj["connected"] || "0")
+                quickPanel.btDevice = obj["device"] || ""
+            }
+        }
+    }
+
+    Timer {
+        interval: 4000
+        repeat: true
+        running: quickPanel.visible
+        triggeredOnStart: true
+        onTriggered: {
+            if (!btStateProc.running) btStateProc.running = true
+        }
+    }
+
+    readonly property string bluetoothSummary: {
+        if (!quickPanel.btRead)
+            return "Checking…"
+        if (!quickPanel.btPowered)
+            return "Adapter off"
+        if (quickPanel.btConnected === 0)
+            return "On, nothing connected"
+        if (quickPanel.btDevice !== "")
+            return quickPanel.btConnected > 1
+                ? quickPanel.btDevice + " +" + (quickPanel.btConnected - 1)
+                : quickPanel.btDevice
+        return quickPanel.btConnected + " connected"
+    }
 
     // ## USB
     // Only polled while open
@@ -295,6 +376,102 @@ PopupWindow {
                     onActivated: {
                         quickPanel.forceClose()
                         root.overview.open()
+                    }
+                }
+            }
+
+            // ## Devices
+            // A line of live state each, and a shortcut into the real panel —
+            // the quick panel should answer "what is it doing" without a detour.
+
+            SectionLabel { Layout.fillWidth: true; text: "Devices" }
+
+            Repeater {
+                model: [
+                    {
+                        key: "audio", icon: "media_output", label: "Audio",
+                        target: root.audioPopup
+                    },
+                    {
+                        key: "network", icon: "wired", label: "Network",
+                        target: root.networkPopup
+                    },
+                    {
+                        key: "bluetooth", icon: "bluetooth", label: "Bluetooth",
+                        target: root.bluetoothPopup
+                    }
+                ]
+
+                delegate: Rectangle {
+                    required property var modelData
+
+                    readonly property string detail: {
+                        if (modelData.key === "audio")
+                            return quickPanel.audioSummary
+                        if (modelData.key === "network")
+                            return quickPanel.networkSummary
+                        return quickPanel.bluetoothSummary
+                    }
+
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 46
+                    radius: Theme.radiusSmall
+                    color: deviceArea.containsMouse ? Theme.alpha(Theme.accent, 0.18)
+                                                    : Theme.alpha(Theme.textBase, 0.08)
+                    border.width: Theme.borderWidth
+                    border.color: Theme.border
+
+                    Behavior on color { ColorAnimation { duration: Theme.durFast } }
+
+                    Icon {
+                        id: deviceIcon
+                        anchors.left: parent.left
+                        anchors.leftMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        iconName: modelData.icon
+                        iconSize: 18
+                        color: Theme.accentIcon
+                    }
+
+                    Column {
+                        anchors.left: deviceIcon.right
+                        anchors.leftMargin: 10
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 1
+
+                        Text {
+                            width: parent.width
+                            text: modelData.label
+                            color: Theme.text
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.labelSize
+                            font.weight: 600
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: parent.parent.detail
+                            elide: Text.ElideRight
+                            color: Theme.textMute
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.descSize
+                        }
+                    }
+
+                    MouseArea {
+                        id: deviceArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (!modelData.target)
+                                return
+                            quickPanel.forceClose()
+                            modelData.target.backTarget = quickPanel
+                            modelData.target.forceOpen(mainWindow.settingsAnchor)
+                        }
                     }
                 }
             }

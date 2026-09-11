@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Controls
 
 import qs.Objects.Design
+import qs.Objects.Theme
 import qs.Objects.Widgets
 import qs.Objects.Window
 
@@ -19,11 +20,15 @@ PopupPanel {
 
     signal runRequested()
     signal historyRequested()
+    signal settingsRequested(string page)
+    signal overviewRequested()
+    signal wallpaperRequested()
+    signal gamingRequested()
 
     component DropdownButton: RoundButton {
         property string iconName: ""
         Layout.fillWidth: true
-        font.family: root.settings.fontFamily
+        font.family: Theme.fontFamily
         font.pixelSize: 13
         font.weight: 600
         padding: 6
@@ -38,13 +43,13 @@ PopupPanel {
             Text {
                 text: parent.parent.text
                 font: parent.parent.font
-                color: root.theme.text
+                color: Theme.text
                 Layout.fillWidth: true
             }
         }
         background: Rectangle {
             radius: 6
-            color: dbHov.hovered ? root.theme.primary : "transparent"
+            color: dbHov.hovered ? Theme.accent : "transparent"
             opacity: dbHov.hovered ? 0.18 : 1
         }
         HoverHandler { id: dbHov; cursorShape: Qt.PointingHandCursor }
@@ -54,6 +59,16 @@ PopupPanel {
         id: addDropdownColumn
         anchors.fill: parent
         spacing: 0
+
+        component Divider: Rectangle {
+            Layout.fillWidth: true
+            Layout.topMargin: 4
+            Layout.bottomMargin: 4
+            Layout.leftMargin: 12
+            Layout.rightMargin: 12
+            height: 1
+            color: Theme.border
+        }
 
         DropdownButton {
             text: "Add Pinned App\nFrom Installed Apps"
@@ -88,6 +103,55 @@ PopupPanel {
             onClicked: {
                 addDropdown.forceClose()
                 if (addDropdown.appWindow) addDropdown.appWindow.openCustom()
+            }
+        }
+
+        Divider {}
+
+        DropdownButton {
+            text: "Workspace Overview"
+            iconName: "apps"
+            onClicked: {
+                addDropdown.forceClose()
+                addDropdown.overviewRequested()
+            }
+        }
+
+        DropdownButton {
+            text: "Next Wallpaper"
+            iconName: "wallpaper"
+            onClicked: {
+                addDropdown.forceClose()
+                addDropdown.wallpaperRequested()
+            }
+        }
+
+        DropdownButton {
+            text: "Toggle Gaming Mode"
+            iconName: "hide"
+            onClicked: {
+                addDropdown.forceClose()
+                addDropdown.gamingRequested()
+            }
+        }
+
+        Divider {}
+
+        DropdownButton {
+            text: "Bar Layout"
+            iconName: "settings"
+            onClicked: {
+                addDropdown.forceClose()
+                addDropdown.settingsRequested("bar")
+            }
+        }
+
+        DropdownButton {
+            text: "All Settings"
+            iconName: "settings"
+            onClicked: {
+                addDropdown.forceClose()
+                addDropdown.settingsRequested("")
             }
         }
     }

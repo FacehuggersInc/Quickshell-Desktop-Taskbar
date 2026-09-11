@@ -6,7 +6,6 @@ Item {
     id: control
 
     property bool checked: false
-    property bool enabled: true
     signal toggled(bool value)
 
     implicitWidth: 44
@@ -39,8 +38,7 @@ Item {
 
     MouseArea {
         anchors.fill: parent
-        enabled: control.enabled
-        cursorShape: Qt.PointingHandCursor
+                cursorShape: Qt.PointingHandCursor
         onClicked: {
             control.checked = !control.checked
             control.toggled(control.checked)

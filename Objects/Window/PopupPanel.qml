@@ -15,7 +15,7 @@ PopupWindow {
     id: popup
     anchor.window: mainWindow
     anchor.rect.x: 0
-    anchor.rect.y: mainWindow.height + 5
+    anchor.rect.y: mainWindow.popupOffset(implicitHeight)
     implicitWidth: 350
     implicitHeight: 450
     color: "transparent"
@@ -56,7 +56,13 @@ PopupWindow {
                 popup.isClosing = false
                 display.alpha = 0
                 display.height = 0
+                return
             }
+
+            // Track the content from here on. The animation target was a
+            // snapshot, and a menu built by a Repeater is still empty when the
+            // reveal starts, so the panel stayed shorter than its rows.
+            display.height = Qt.binding(function() { return popup.implicitHeight })
         }
     }
 
@@ -89,6 +95,13 @@ PopupWindow {
         id: focusGrab
         active: false
         windows: [ popup ]
+
+        // The grab was taken but never acted on, so clicking away released it
+        // and left the popup sitting there
+        onCleared: {
+            if (popup.requireFocusGrab && popup.visible && !popup.isClosing)
+                popup.forceClose()
+        }
     }
 
     required property var content
@@ -100,8 +113,11 @@ PopupWindow {
         radius: Theme.radius
         implicitWidth: popup.implicitWidth
         color: Theme.panelScrim
-        sidePadding: sidePadding
-        tbPadding: tbPadding
+
+        // The specular top run reads as a stray white line on a small panel
+        highlight: false
+        sidePadding: popup.sidePadding
+        tbPadding: popup.tbPadding
         clip: true
         LayoutItemProxy {
             target: content
@@ -116,13 +132,31 @@ PopupWindow {
         popup.anchor.rect.x = (position.x + (widget.width / 2)) - (popup.width / 2)
     }
 
+    // Opens centred on a point rather than on a widget, clamped so it cannot
+    // run off either edge of the screen
+    function forceOpenAt(x) {
+        popup.pendingX = x
+        popup.openAtPoint = true
+        popup.forceOpen(null)
+        popup.openAtPoint = false
+    }
+
+    property real pendingX: 0
+    property bool openAtPoint: false
+
     function forceOpen(widget) {
         heightAnim.stop()
         alphaAnim.stop()
         popup.shouldHide = false
         popup.isClosing = false
 
-        updatePopupPosition(widget)
+        if (popup.openAtPoint) {
+            var limit = mainWindow.width - popup.implicitWidth - 8
+            popup.anchor.rect.x = Math.max(8,
+                Math.min(limit, popup.pendingX - popup.implicitWidth / 2))
+        } else if (widget) {
+            updatePopupPosition(widget)
+        }
 
         // Zero out before mapping so compositor gets a clean first frame
         display.alpha = 0
@@ -134,12 +168,15 @@ PopupWindow {
         alphaAnim.to = fadingEffectMax
         alphaAnim.start()
 
+        // Height was a snapshot taken at open time. A menu whose rows are built
+        // by a Repeater is still empty at that moment, so the panel ended up
+        // shorter than its content and clipped it.
         if (scrollingEffect) {
             heightAnim.from = 0
             heightAnim.to = popup.implicitHeight
             heightAnim.start()
         } else {
-            display.height = popup.implicitHeight
+            display.height = Qt.binding(function() { return popup.implicitHeight })
         }
 
         popup.open()
@@ -147,6 +184,12 @@ PopupWindow {
     }
 
     function forceClose() {
+        // Drop the tracking binding so the close animation can drive height
+        display.height = display.height
+
+        grabFocus.running = false
+        focusGrab.active = false
+
         if (popup.isClosing) return
         popup.isClosing = true
         popup.shouldHide = true
@@ -166,7 +209,6 @@ PopupWindow {
 
         content.visible = false
         popup.close()
-        if (requireFocusGrab) grabFocus.running = true
     }
 
     function toggle(widget) {

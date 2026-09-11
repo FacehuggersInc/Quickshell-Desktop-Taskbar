@@ -87,6 +87,30 @@ QtObject {
                     ]
                 },
                 {
+                    title: "Icons",
+                    items: [
+                        {
+                            key: "theme.icons", type: "segmented", label: "Icon Source",
+                            description: "Material Symbols needs ttf-material-symbols-variable",
+                            options: [
+                                { label: "Auto", value: "auto" },
+                                { label: "Font", value: "font" },
+                                { label: "Folder", value: "images" }
+                            ],
+                            fallback: "auto"
+                        },
+                        {
+                            key: "theme.iconFamily", type: "select", label: "Symbol Style",
+                            options: [
+                                { label: "Rounded", value: "Material Symbols Rounded" },
+                                { label: "Outlined", value: "Material Symbols Outlined" },
+                                { label: "Sharp", value: "Material Symbols Sharp" }
+                            ],
+                            fallback: "Material Symbols Rounded"
+                        }
+                    ]
+                },
+                {
                     title: "Typography",
                     items: [
                         {
@@ -184,46 +208,63 @@ QtObject {
             ]
         },
         {
-            id: "display",
-            title: "Display",
-            icon: "brightness",
-            groups: [
-                {
-                    title: "Brightness",
-                    items: [
-                        { key: "", type: "brightness", label: "Brightness",
-                          description: "Applies to every ddc capable display" },
-                        { key: "", type: "action", label: "Re-detect Monitors",
-                          description: "Rescan for ddc capable displays",
-                          action: "brightnessRefresh" }
-                    ]
-                },
-                {
-                    title: "Theater",
-                    items: [
-                        {
-                            key: "primaryDisplayIndex", type: "select", label: "Primary Display",
-                            description: "The display theater mode leaves undimmed",
-                            optionsFrom: "monitors", fallback: 0
-                        },
-                        {
-                            key: "theater.dimBrightness", type: "stepper", label: "Dim Level",
-                            description: "Brightness of non primary displays",
-                            from: 0, to: 50, step: 1, suffix: "%", fallback: 10
-                        },
-                        {
-                            key: "theater.wallpaper", type: "field", label: "Theater Wallpaper",
-                            description: "Shown on dimmed displays", fallback: ""
-                        }
-                    ]
-                }
-            ]
-        },
-        {
             id: "bar",
             title: "Bar",
             icon: "apps",
+            custom: "bar",
             groups: [
+                {
+                    title: "Placement",
+                    items: [
+                        {
+                            key: "bar.position", type: "segmented", label: "Position",
+                            description: "Which edge of the screen the bar sits on",
+                            options: [
+                                { label: "Top", value: "top" },
+                                { label: "Bottom", value: "bottom" }
+                            ],
+                            fallback: "top"
+                        },
+                        {
+                            key: "bar.style", type: "segmented", label: "Style",
+                            description: "Separate rounded blocks, or one bar spanning the screen",
+                            options: [
+                                { label: "Blocks", value: "blocks" },
+                                { label: "Full", value: "full" }
+                            ],
+                            fallback: "blocks"
+                        }
+                    ]
+                },
+                {
+                    title: "Metrics",
+                    items: [
+                        {
+                            key: "bar.height", type: "stepper", label: "Bar Height",
+                            from: 24, to: 72, step: 1, suffix: "px", fallback: 42
+                        },
+                        {
+                            key: "bar.padding", type: "stepper", label: "Edge Padding",
+                            description: "Inset before the first and after the last block",
+                            from: 0, to: 40, step: 1, suffix: "px", fallback: 0
+                        },
+                        {
+                            key: "bar.spacing", type: "stepper", label: "Block Spacing",
+                            description: "Gap between the bar's blocks",
+                            from: 0, to: 40, step: 1, suffix: "px", fallback: 5
+                        },
+                        {
+                            key: "bar.widgetSpacing", type: "stepper", label: "Widget Spacing",
+                            description: "Gap between widgets inside a block",
+                            from: 0, to: 30, step: 1, suffix: "px", fallback: 8
+                        },
+                        {
+                            key: "bar.blockPadding", type: "stepper", label: "Block Inset",
+                            description: "Space between a block's edge and its widgets",
+                            from: 0, to: 40, step: 1, suffix: "px", fallback: 15
+                        }
+                    ]
+                },
                 {
                     title: "Clock",
                     items: [
@@ -256,15 +297,13 @@ QtObject {
                         }
                     ]
                 },
+
                 {
-                    title: "Gaming Mode",
+                    title: "Gaming Bar",
                     items: [
                         {
-                            key: "gaming.enabled", type: "switch", label: "Gaming Mode",
-                            description: "Hide the bar entirely", fallback: false
-                        },
-                        {
                             key: "gaming.barHeight", type: "stepper", label: "Revealed Height",
+                            description: "How tall the bar becomes when you hover the edge",
                             from: 8, to: 48, step: 1, suffix: "px", fallback: 14
                         }
                     ]
@@ -281,6 +320,60 @@ QtObject {
             ]
         },
         {
+            id: "displays",
+            title: "Displays",
+            icon: "brightness",
+            custom: "displays",
+            groups: [
+                {
+                    title: "Brightness",
+                    items: [
+                        { key: "", type: "brightness", label: "Brightness",
+                          description: "Applies to every ddc capable display" },
+                        { key: "", type: "action", label: "Re-detect Monitors",
+                          description: "Rescan for ddc capable displays",
+                          action: "brightnessRefresh" }
+                    ]
+                },
+                {
+                    title: "Theater",
+                    items: [
+
+                        {
+                            key: "theater.dimBrightness", type: "stepper", label: "Dim Level",
+                            description: "Brightness of non primary displays",
+                            from: 0, to: 50, step: 1, suffix: "%", fallback: 10
+                        },
+                        {
+                            key: "theater.wallpaper", type: "field", label: "Theater Wallpaper",
+                            description: "Shown on dimmed displays", fallback: ""
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            id: "hotkeys",
+            title: "Hotkeys",
+            icon: "terminal",
+            custom: "hotkeys",
+            groups: []
+        },
+        {
+            id: "startup",
+            title: "Startup Apps",
+            icon: "restart",
+            custom: "startup",
+            groups: []
+        },
+        {
+            id: "pinned",
+            title: "Pinned Apps",
+            icon: "apps",
+            custom: "pinned",
+            groups: []
+        },
+        {
             id: "audio",
             title: "Audio",
             icon: "volume_max",
@@ -288,10 +381,31 @@ QtObject {
             groups: []
         },
         {
+            id: "network",
+            title: "Network",
+            icon: "wired",
+            custom: "network",
+            groups: []
+        },
+        {
             id: "bluetooth",
             title: "Bluetooth",
             icon: "bluetooth",
             custom: "bluetooth",
+            groups: []
+        },
+        {
+            id: "mime",
+            title: "File Types",
+            icon: "open_folder",
+            custom: "mime",
+            groups: []
+        },
+        {
+            id: "packages",
+            title: "Packages",
+            icon: "download",
+            custom: "packages",
             groups: []
         },
         {
@@ -322,6 +436,20 @@ QtObject {
                     ]
                 }
             ]
+        },
+        {
+            id: "gaming",
+            title: "Gaming",
+            icon: "hide",
+            custom: "gaming",
+            groups: []
+        },
+        {
+            id: "debug",
+            title: "Debug",
+            icon: "search",
+            custom: "debug",
+            groups: []
         },
         {
             id: "advanced",

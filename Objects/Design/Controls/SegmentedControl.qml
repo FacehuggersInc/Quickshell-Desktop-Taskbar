@@ -8,12 +8,12 @@ Item {
     // [{ label, value, color }] — color is optional and tints the track
     property var options: []
     property var value: null
-    property bool enabled: true
     signal picked(var value)
 
     readonly property int index: {
-        for (var i = 0; i < options.length; i++) {
-            if (options[i].value === control.value)
+        var list = control.options ? control.options : []
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].value === control.value)
                 return i
         }
         return 0
@@ -33,7 +33,7 @@ Item {
         control.slot = Math.max(46, Math.ceil(widest) + 24)
     }
 
-    implicitWidth: slot * Math.max(1, options.length)
+    implicitWidth: slot * Math.max(1, options ? options.length : 1)
     implicitHeight: Theme.controlHeight
     opacity: enabled ? 1.0 : 0.4
 
@@ -70,7 +70,7 @@ Item {
         anchors.fill: parent
 
         Repeater {
-            model: control.options
+            model: control.options ? control.options : []
 
             delegate: Item {
                 id: segment
@@ -98,8 +98,7 @@ Item {
 
                 MouseArea {
                     anchors.fill: parent
-                    enabled: control.enabled
-                    cursorShape: Qt.PointingHandCursor
+                                        cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         control.value = segment.modelData.value
                         control.picked(segment.modelData.value)

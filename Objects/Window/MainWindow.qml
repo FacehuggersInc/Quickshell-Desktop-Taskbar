@@ -22,6 +22,39 @@ PanelWindow {
         id: tooltipWindow
     }
 
+    // ## Layout from config
+
+    // A shallow copy, so the property identity changes on every write. Returning
+    // the same object reference would leave dependents thinking nothing moved
+    // even though the arrays inside it had been replaced.
+    readonly property var barConfig: {
+        var bump = root.settingsRevision
+        var source = root.settings.bar || ({})
+        var out = ({})
+        for (var key in source)
+            out[key] = source[key]
+        return out
+    }
+    readonly property bool atBottom: barConfig.position === "bottom"
+    readonly property bool fullWidth: barConfig.style === "full"
+
+    readonly property var leftWidgets:
+        barConfig.left !== undefined ? barConfig.left : ["workspaces"]
+    readonly property var centerWidgets:
+        barConfig.center !== undefined ? barConfig.center : ["appbar"]
+    readonly property var rightWidgets:
+        barConfig.right !== undefined ? barConfig.right
+            : ["clock", "date", "separator", "volume", "network", "bluetooth", "tray", "notifications"]
+
+    // Anything opened from the quick panel anchors here, since the widget that
+    // owns the popup may not be the one that asked for it
+    property var settingsAnchor: null
+
+    // Popups anchor under a top bar and above a bottom one
+    function popupOffset(popupHeight) {
+        return mainWindow.atBottom ? -(popupHeight + 5) : mainWindow.height + 5
+    }
+
     // ## Glass
     // Blur is a property of the surface, not of the blocks, so the region is a
     // union of the four block regions. Gaps between groups stay unblurred. Each
@@ -30,19 +63,21 @@ PanelWindow {
     WlrLayershell.namespace: "quickshell:bar"
 
     property Region barBlurRegion: Region {
-        regions: [
-            leftModules.blurRegion,
-            appbar.blurRegion,
-            trayBlock.blurRegion,
-            rightModules.blurRegion
-        ]
+        regions: mainWindow.fullWidth
+            ? [ fullBar.blurRegion ]
+            : [
+                leftModules.blurRegion,
+                appbar.blurRegion,
+                rightModules.blurRegion
+            ]
     }
 
     BackgroundEffect.blurRegion:
         (Theme.glass && Theme.blurMode === "protocol" && !mainWindow.gamingMode)
             ? mainWindow.barBlurRegion : null
     anchors {
-        top: true 
+        top: !mainWindow.atBottom
+        bottom: mainWindow.atBottom
         left: true
         right: true
     }
@@ -53,7 +88,8 @@ PanelWindow {
     property bool gamingBarRevealed: false
 
     // Height of the bar window in normal mode.
-    property int barHeight: 42
+    readonly property int barHeight:
+        barConfig.height !== undefined ? barConfig.height : 42
 
     // Height of the RoundedBlocks themselves. Equal to barHeight means the
     // blocks fill the bar completely — drop this (e.g. 34) if you want slim
@@ -69,9 +105,68 @@ PanelWindow {
         NumberAnimation { duration: 150; easing.type: Easing.InOutQuad }
     }
 
-    // Blocks sit flush against the bar window, so there is no outer padding.
-    property int padding: 0
-    property int spacing: 5
+    // Outer inset before the first block, and the gap between blocks
+    readonly property int padding:
+        barConfig.padding !== undefined ? barConfig.padding : 0
+    readonly property int spacing:
+        barConfig.spacing !== undefined ? barConfig.spacing : 5
+
+    // Gap between widgets inside a block
+    readonly property int widgetSpacing:
+        barConfig.widgetSpacing !== undefined ? barConfig.widgetSpacing : 8
+
+    // Inset between a block's edge and its widgets. This was a hardcoded 15 and
+    // is what pushes the outermost widgets away from the screen edges.
+    readonly property int blockPadding:
+        barConfig.blockPadding !== undefined ? barConfig.blockPadding : 15
+
+    // ## Shared popups
+    // Owned by the bar window, not by the widgets. A widget removed from the
+    // zone config took its popup with it, so the quick panel had nothing to open.
+
+    AudioManagementPopup {
+        id: sharedAudioPopup
+        Component.onCompleted: root.audioPopup = sharedAudioPopup
+    }
+
+    NetworkPopup {
+        id: sharedNetworkPopup
+        Component.onCompleted: root.networkPopup = sharedNetworkPopup
+    }
+
+    BluetoothPopup {
+        id: sharedBluetoothPopup
+        Component.onCompleted: root.bluetoothPopup = sharedBluetoothPopup
+    }
+
+    // Owned here rather than reached for through the app bar
+    AppBarAddDropdown {
+        id: barMenu
+        appWindow: root.addAppWindow
+
+        onRunRequested: {
+            if (root.barMenu) root.barMenu.runRequested()
+        }
+        onHistoryRequested: {
+            if (root.barMenu) root.barMenu.historyRequested()
+        }
+        onOverviewRequested: root.overview.open()
+        onWallpaperRequested: root.nextWallpaper()
+
+        onGamingRequested: {
+            if (!root.settings.gaming)
+                root.settings.gaming = ({ enabled: true, apps: [] })
+            else
+                root.settings.gaming.enabled = !root.settings.gaming.enabled
+            root.saveSettings()
+        }
+
+        onSettingsRequested: (page) => {
+            if (page !== "")
+                settingsWindow.pageId = page
+            settingsWindow.open()
+        }
+    }
 
     // ── Gaming mode: hover zone + revealed bar ──────────────────────
     // A 2px sliver is always present so the mouse has something to enter.
@@ -169,25 +264,84 @@ PanelWindow {
         }
         padding: 0
 
+        // ## Bar context menu
+        // On the bar container itself rather than its background, which sits
+        // beneath the blocks and never saw the press. A handler here still sees
+        // events the blocks do not take, and unlike a MouseArea it carries no
+        // cursor shape, so nothing below is shadowed.
+        TapHandler {
+            id: barTap
+            acceptedButtons: Qt.RightButton
+            gesturePolicy: TapHandler.ReleaseWithinBounds
+            enabled: !mainWindow.gamingMode
+            onTapped: {
+                if (barMenu.visible)
+                    barMenu.forceClose()
+                else
+                    barMenu.forceOpenAt(barTap.point.position.x)
+            }
+        }
+
+        // ## Full width backing
+        // In full mode the per-group blocks go transparent and this single
+        // block draws the bar, so the widgets keep their existing positions.
+
+        RoundedBlock {
+            id: fullBar
+            visible: mainWindow.fullWidth
+            z: -1
+
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: mainWindow.atBottom ? undefined : parent.top
+            anchors.bottom: mainWindow.atBottom ? parent.bottom : undefined
+            height: mainWindow.blockHeight
+
+            sidePadding: 0
+            tbPadding: 0
+            angular: true
+            flushLeft: true
+            flushRight: true
+            flushTop: !mainWindow.atBottom
+            flushBottom: mainWindow.atBottom
+            elevated: false
+        }
+
         // LEFT MODULES
         Row {
             anchors.left: parent.left
-            anchors.leftMargin: mainWindow.padding
-            anchors.top: parent.top
+            anchors.leftMargin: mainWindow.fullWidth
+                ? Math.max(15, mainWindow.padding) : mainWindow.padding
+            anchors.top: mainWindow.atBottom ? undefined : parent.top
+            anchors.bottom: mainWindow.atBottom ? parent.bottom : undefined
             spacing: mainWindow.spacing
 
             RoundedBlock {
                 id: leftModules
-                sidePadding: 15
+                sidePadding: mainWindow.blockPadding
                 tbPadding: 0
                 height: mainWindow.blockHeight
+                color: mainWindow.fullWidth ? "transparent" : Theme.surface
+                border: !mainWindow.fullWidth
+                highlight: !mainWindow.fullWidth
+                visible: mainWindow.leftWidgets.length > 0
 
                 angular: true
-                flushTop: true
+                flushTop: !mainWindow.atBottom
+                flushBottom: mainWindow.atBottom
                 flushLeft: true
 
-                WorkspaceSwitcherWidget {
+                RowLayout {
                     anchors.centerIn: parent
+                    spacing: mainWindow.widgetSpacing
+
+                    Repeater {
+                        model: mainWindow.leftWidgets
+                        delegate: BarWidget {
+                            required property var modelData
+                            widgetId: modelData
+                        }
+                    }
                 }
             }
         }
@@ -195,64 +349,63 @@ PanelWindow {
         // CENTER MODULES
         Row{
             anchors.horizontalCenter: parent.horizontalCenter
-            anchors.top: parent.top
+            anchors.top: mainWindow.atBottom ? undefined : parent.top
+            anchors.bottom: mainWindow.atBottom ? parent.bottom : undefined
             spacing: mainWindow.spacing
 
             AppBarWidget{
                 id: appbar
                 height: mainWindow.blockHeight
+                visible: mainWindow.centerWidgets.indexOf("appbar") !== -1
+                color: mainWindow.fullWidth ? "transparent" : Theme.surface
+                border: !mainWindow.fullWidth
+                highlight: !mainWindow.fullWidth
 
                 angular: true
-                flushTop: true
+                flushTop: !mainWindow.atBottom
+                flushBottom: mainWindow.atBottom
             }
         }
 
         // RIGHT MODULES
         Row{
             anchors.right: parent.right
-            anchors.rightMargin: mainWindow.padding
-            anchors.top: parent.top
+            anchors.rightMargin: mainWindow.fullWidth
+                ? Math.max(15, mainWindow.padding) : mainWindow.padding
+            anchors.top: mainWindow.atBottom ? undefined : parent.top
+            anchors.bottom: mainWindow.atBottom ? parent.bottom : undefined
             spacing: mainWindow.spacing
-
-            SystemTray {
-                id: trayBlock
-                height: mainWindow.blockHeight
-
-                angular: true
-                flushTop: true
-            }
 
             RoundedBlock{
                 id: rightModules
                 height: mainWindow.blockHeight
+                sidePadding: mainWindow.blockPadding
+                color: mainWindow.fullWidth ? "transparent" : Theme.surface
+                border: !mainWindow.fullWidth
+                highlight: !mainWindow.fullWidth
 
                 angular: true
-                flushTop: true
+                flushTop: !mainWindow.atBottom
+                flushBottom: mainWindow.atBottom
                 flushRight: true
 
                 RowLayout {
                     anchors.centerIn: parent
-                    spacing: 8
+                    spacing: mainWindow.widgetSpacing
 
-                    ClockWidget {}
-
-                    DateWidget {}
-
-                    Rectangle {
-                        Layout.preferredWidth: 1
-                        Layout.preferredHeight: 18
-                        Layout.leftMargin: 4
-                        Layout.rightMargin: 4
-                        color: Theme.border
+                    Repeater {
+                        model: mainWindow.rightWidgets
+                        delegate: BarWidget {
+                            required property var modelData
+                            widgetId: modelData
+                        }
                     }
 
-                    VolumeWidget {}
-                    NetworkWidget {}
-                    BluetoothWidget {}
                     IconButton{
                         id: settingsIconButton
                         iconName: "settings"
                         iconSize: 22
+                        Component.onCompleted: mainWindow.settingsAnchor = settingsIconButton
                         color: root.theme.primary
                         tooltipText: "Open Settings"
                         onClicked: {
@@ -276,7 +429,6 @@ PanelWindow {
                         }
                         
                     }
-                    NotificationsWidget {}
                 }
             }
         }

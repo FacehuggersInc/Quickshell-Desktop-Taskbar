@@ -1,240 +1,209 @@
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Controls
-import Quickshell.Io
+import Quickshell
 
 import qs.Objects.Design
-import qs.Objects.Widgets
+import qs.Objects.Design.Controls
+import qs.Objects.Theme
 
-// Searchable list of installed apps from .desktop files
+// Installed applications, read live from DesktopEntries
 Item {
     id: existingView
 
     signal appSelected(string name, string exec, string icon, string className)
 
-    property var allApps: []
-    property var filteredApps: []
-    property bool loading: true
+    property string query: ""
 
-    Process {
-        id: desktopAppsProc
-        command: root.newUtill(["--getdesktopapps"])
-        stdout: StdioCollector {
-            onStreamFinished: {
-                var text = this.text.trim()
-                if (text === "none" || text === "") {
-                    existingView.loading = false
-                    return
-                }
-                var apps = []
-                var lines = text.split("\n")
-                for (var i = 0; i < lines.length; i++) {
-                    var parts = lines[i].split("|")
-                    if (parts.length < 4) continue
-                    apps.push({
-                        name:      parts[0],
-                        exec:      parts[1],
-                        icon:      parts[2],
-                        className: parts[3],
-                        comment:   parts.length > 4 ? parts[4] : ""
-                    })
-                }
-                // Filter out already pinned apps
-                var pinned = root.settings.launchers.map(function(l) { return l.name })
-                apps = apps.filter(function(a) {
-                    return !pinned.includes(a.className)
-                })
-                existingView.allApps      = apps
-                existingView.filteredApps = apps
-                existingView.loading      = false
+    // ## Source
+    // DesktopEntries tracks .desktop files as they appear and disappear, so
+    // installing or removing an application updates this without a rescan. The
+    // old path shelled out to python and only refreshed when the window opened.
+
+    readonly property var pinned: {
+        var out = []
+        var list = root.settings.launchers || []
+        for (var i = 0; i < list.length; i++)
+            out.push(list[i].name)
+        return out
+    }
+
+    readonly property var allApps: {
+        var out = []
+        var entries = DesktopEntries.applications
+            ? DesktopEntries.applications.values : []
+
+        for (var i = 0; i < entries.length; i++) {
+            var e = entries[i]
+            if (e.noDisplay)
+                continue
+
+            var className = e.startupClass && e.startupClass !== ""
+                ? e.startupClass : e.id
+
+            out.push({
+                name: e.name || e.id,
+                exec: e.execString || "",
+                icon: e.icon || "",
+                className: className,
+                comment: e.comment || e.genericName || "",
+                isPinned: existingView.pinned.indexOf(className) !== -1
+            })
+        }
+
+        out.sort(function(a, b) { return a.name.localeCompare(b.name) })
+        return out
+    }
+
+    readonly property var filteredApps: {
+        var q = existingView.query.trim().toLowerCase()
+        if (!q)
+            return existingView.allApps
+
+        var out = []
+        for (var i = 0; i < existingView.allApps.length; i++) {
+            var a = existingView.allApps[i]
+            if (a.name.toLowerCase().indexOf(q) !== -1
+                    || a.className.toLowerCase().indexOf(q) !== -1
+                    || a.comment.toLowerCase().indexOf(q) !== -1) {
+                out.push(a)
             }
         }
+        return out
     }
 
-    // Re-fetch the full app list — called by AddAppWindow.openExisting()
-    // so that recently pinned/unpinned apps are correctly shown/hidden.
     function refresh() {
-        loading = true
-        allApps = []
-        filteredApps = []
-        if (searchField.text !== "") searchField.text = ""
-        desktopAppsProc.running = true
-    }
-
-    function filterApps(query) {
-        if (query.trim() === "") {
-            filteredApps = allApps
-            return
-        }
-        var q = query.toLowerCase()
-        filteredApps = allApps.filter(function(a) {
-            return a.name.toLowerCase().includes(q)
-                || a.className.toLowerCase().includes(q)
-                || a.comment.toLowerCase().includes(q)
-        })
+        existingView.query = ""
     }
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 8
+        spacing: Theme.gap
 
-        // Search bar
-        Rectangle {
+        RowLayout {
             Layout.fillWidth: true
-            height: 38
-            radius: 8
-            color: root.theme.surface
+            spacing: Theme.gap
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 8
-                spacing: 8
+            InputField {
+                id: search
+                Layout.fillWidth: true
+                placeholder: "Search installed applications"
+                onTextChanged: existingView.query = text
+            }
 
-                Image {
-                    source: root.iconSource("search")
-                    width: 18; height: 18
-                    fillMode: Image.PreserveAspectFit
-                    opacity: 0.5
-                }
-
-                TextField {
-                    id: searchField
-                    Layout.fillWidth: true
-                    placeholderText: "Search applications..."
-                    color: root.theme.text
-                    font.family: root.settings.fontFamily
-                    font.pixelSize: 14
-                    background: Item {}
-                    onTextChanged: existingView.filterApps(text)
-                }
+            Text {
+                text: existingView.filteredApps.length + " apps"
+                color: Theme.textMute
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.descSize
             }
         }
 
-        // Loading indicator
-        Text {
-            visible: existingView.loading
-            text: "Loading applications..."
-            color: root.theme.text
-            opacity: 0.5
-            font.family: root.settings.fontFamily
-            font.pixelSize: 14
-            Layout.alignment: Qt.AlignHCenter
-        }
-
-        // App list
-        ScrollView {
+        ListView {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            visible: !existingView.loading
             clip: true
-            contentHeight: appColumn.implicitHeight
+            spacing: 3
+            model: existingView.filteredApps
 
-            ColumnLayout {
-                id: appColumn
-                width: existingView.width
-                spacing: 2
+            delegate: Rectangle {
+                required property var modelData
 
-                Repeater {
-                    model: existingView.filteredApps
-                    delegate: ItemDelegate {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        height: 52
-                        padding: 0
+                width: ListView.view.width
+                height: 52
+                radius: Theme.radiusSmall
+                color: rowArea.containsMouse ? Theme.alpha(Theme.accent, 0.18)
+                                             : Theme.alpha(Theme.scrimBase, 0.35)
+                border.width: Theme.borderWidth
+                border.color: Theme.alpha(Theme.textBase, 0.08)
+                opacity: modelData.isPinned ? 0.45 : 1.0
 
-                        background: Rectangle {
-                            radius: 6
-                            color: hov.hovered
-                                ? root.theme.primary
-                                : "transparent"
-                            opacity: hov.hovered ? 0.15 : 1
-                        }
+                Behavior on color { ColorAnimation { duration: Theme.durFast } }
 
-                        HoverHandler { id: hov; cursorShape: Qt.PointingHandCursor }
+                // Fixed box, aspect preserved — icons come in every size and
+                // the old list let each one set its own
+                Rectangle {
+                    id: iconBox
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 36
+                    height: 36
+                    radius: Theme.radiusSmall
+                    color: Theme.alpha(Theme.textBase, 0.06)
 
-                        contentItem: RowLayout {
-                            anchors.fill: parent
-                            anchors.margins: 8
-                            spacing: 10
-
-                            // App icon — try system icon then fallback
-                            Image {
-                                source: modelData.icon !== ""
-                                    ? "image://icon/" + modelData.icon
-                                    : root.iconSource("open_app")
-                                width: 28
-                                height: 28
-                                sourceSize.width: 28
-                                sourceSize.height: 28
-                                fillMode: Image.PreserveAspectFit
-                                smooth: true
-                            }
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 2
-                                Text {
-                                    text: modelData.name
-                                    color: root.theme.text
-                                    font.family: root.settings.fontFamily
-                                    font.weight: 600
-                                    font.pixelSize: 14
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-                                Text {
-                                    text: modelData.comment !== ""
-                                        ? modelData.comment
-                                        : modelData.exec
-                                    color: root.theme.text
-                                    opacity: 0.45
-                                    font.family: root.settings.fontFamily
-                                    font.pixelSize: 11
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-                            }
-
-                            // Add button
-                            RoundButton {
-                                text: "Add"
-                                font.family: root.settings.fontFamily
-                                font.pixelSize: 13
-                                padding: 4
-                                horizontalPadding: 14
-                                contentItem: Text {
-                                    text: parent.text
-                                    font: parent.font
-                                    color: root.theme.text
-                                    horizontalAlignment: Text.AlignHCenter
-                                }
-                                background: Rectangle {
-                                    radius: 6
-                                    color: root.theme.primary
-                                    opacity: 0.7
-                                }
-                                HoverHandler { cursorShape: Qt.PointingHandCursor }
-                                onClicked: {
-                                    existingView.appSelected(
-                                        modelData.name,
-                                        modelData.exec,
-                                        modelData.icon,
-                                        modelData.className
-                                    )
-                                }
-                            }
-                        }
-
-                        onClicked: {
-                            existingView.appSelected(
-                                modelData.name,
-                                modelData.exec,
-                                modelData.icon,
-                                modelData.className
-                            )
-                        }
+                    Image {
+                        anchors.fill: parent
+                        anchors.margins: 5
+                        source: modelData.icon !== "" ? Quickshell.iconPath(modelData.icon, true) : ""
+                        fillMode: Image.PreserveAspectFit
+                        sourceSize.width: 64
+                        sourceSize.height: 64
+                        smooth: true
+                        asynchronous: true
                     }
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: modelData.icon === ""
+                        text: modelData.name.charAt(0).toUpperCase()
+                        color: Theme.textMute
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 16
+                        font.weight: 700
+                    }
+                }
+
+                Column {
+                    anchors.left: iconBox.right
+                    anchors.leftMargin: 10
+                    anchors.right: pinnedTag.left
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 1
+
+                    Text {
+                        width: parent.width
+                        text: modelData.name
+                        elide: Text.ElideRight
+                        color: Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.labelSize
+                        font.weight: 600
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: modelData.comment !== "" ? modelData.comment : modelData.className
+                        elide: Text.ElideRight
+                        color: Theme.textMute
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.descSize
+                    }
+                }
+
+                Text {
+                    id: pinnedTag
+                    anchors.right: parent.right
+                    anchors.rightMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: modelData.isPinned
+                    text: "PINNED"
+                    color: Theme.accentText
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 9
+                    font.weight: 700
+                    font.letterSpacing: 1.2
+                }
+
+                MouseArea {
+                    id: rowArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    enabled: !modelData.isPinned
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: existingView.appSelected(
+                        modelData.name, modelData.exec,
+                        modelData.icon, modelData.className)
                 }
             }
         }

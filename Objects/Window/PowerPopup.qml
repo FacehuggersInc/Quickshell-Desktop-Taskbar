@@ -42,6 +42,8 @@ PanelWindow {
             ? glassBlurRegion : null
 
     readonly property var actions: [
+        { icon: "download", key: "update", label: "Update System",
+          desc: powerUpdateLabel.text, danger: false },
         { icon: "lock", key: "lock", label: "Lock", desc: "Lock the session", danger: false },
         { icon: "hide", key: "logout", label: "Log Out", desc: "End the session", danger: false },
         { icon: "dark_mode", key: "suspend", label: "Suspend", desc: "Sleep to RAM", danger: false },
@@ -65,7 +67,19 @@ PanelWindow {
 
     function run(key) {
         close()
+        if (key === "update") {
+            PackageSystem.updateAll()
+            return
+        }
         root.cmdExec(key)
+    }
+
+    // Kept as an item so the description tracks the update count
+    QtObject {
+        id: powerUpdateLabel
+        readonly property string text: PackageSystem.updateCount > 0
+            ? PackageSystem.updateCount + " updates waiting"
+            : "Check for and install updates"
     }
 
     Item {
@@ -87,6 +101,16 @@ PanelWindow {
 
     Rectangle {
         id: card
+
+        // Swallows clicks so empty space inside the card does not reach the
+        // dismiss area behind it
+        MouseArea {
+            anchors.fill: parent
+            z: -1
+            acceptedButtons: Qt.AllButtons
+            onClicked: {}
+            onPressed: {}
+        }
         anchors.centerIn: parent
         width: 300
         height: column.implicitHeight + 28

@@ -1,4 +1,4 @@
-import os, sys, subprocess, time, random, re, json, glob, select, configparser
+import os, sys, subprocess, time, random, re, json, glob, select, configparser, shutil, hashlib
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlparse
@@ -389,16 +389,1284 @@ class Utill():
 
     # ── THEME ────────────────────────────────────────────────────────────────
 
-    @argfunc
-    def generatetheme(self, *args):
-        ## colormath is only needed here, so it stays out of module scope —
-        ## every poll spawns this file and paid that import otherwise
-        from theme import build_theme
-        return build_theme(args[1:], args[0])
 
     # ── HYPRLAND / WINDOWS ───────────────────────────────────────────────────
 
 
+
+    ## ── HYPRLAND CONFIG ──────────────────────────────────────────────────────
+
+    @argfunc
+    def hyprconfig(self, *args):
+        ## Reports what the user's own Hyprland config already says about
+        ## monitors, so the shell can show where it is being overridden rather
+        ## than silently fighting a line the user forgot about.
+        base = Path(os.environ.get("HYPRLAND_CONFIG_DIR")
+                    or (XDG_CONFIG / "hypr"))
+
+        result = {"dir": str(base), "files": [], "entries": []}
+        if not base.is_dir():
+            return json.dumps(result)
+
+        paths = []
+        for pattern in ("*.lua", "*.conf"):
+            paths.extend(sorted(base.rglob(pattern)))
+
+        for path in paths:
+            try:
+                text = path.read_text(errors="replace")
+            except Exception:
+                continue
+
+            result["files"].append(str(path))
+            lines = text.split("\n")
+            index = 0
+
+            while index < len(lines):
+                raw = lines[index]
+                stripped = raw.strip()
+
+                if stripped.startswith("--") or stripped.startswith("#"):
+                    index += 1
+                    continue
+
+                entry = None
+
+                if "hl.monitor" in stripped or "hl.dsp.monitor" in stripped:
+                    ## A Lua block can span many lines, so read until the
+                    ## parentheses balance again
+                    block = []
+                    depth = 0
+                    cursor = index
+                    while cursor < len(lines) and cursor < index + 30:
+                        block.append(lines[cursor])
+                        depth += lines[cursor].count("(") - lines[cursor].count(")")
+                        if depth <= 0 and len(block) > 0:
+                            break
+                        cursor += 1
+
+                    joined = " ".join(l.strip() for l in block)
+                    name = ""
+                    match = re.search(r'name\s*=\s*"([^"]+)"', joined)
+                    if not match:
+                        match = re.search(r'hl\.monitor\s*\(\s*"([^"]+)"', joined)
+                    if match:
+                        name = match.group(1)
+
+                    entry = {"kind": "lua", "name": name,
+                             "raw": joined[:400], "line": index + 1}
+                    index = cursor
+
+                elif re.match(r'monitor\s*=', stripped):
+                    value = stripped.split("=", 1)[1].strip()
+                    entry = {"kind": "hyprlang",
+                             "name": value.split(",")[0].strip(),
+                             "raw": stripped[:400], "line": index + 1}
+
+                if entry:
+                    entry["file"] = str(path)
+                    result["entries"].append(entry)
+
+                index += 1
+
+        return json.dumps(result)
+
+    ## ── HYPRLAND LUA CONFIG ──────────────────────────────────────────────────
+    ## Surgical edits only. Everything outside the field being changed is left
+    ## byte for byte, including comments, spacing, and keys the shell does not
+    ## know about such as bitdepth. Every write takes a timestamped backup.
+
+    LUA_STRING_KEYS = {"output", "mode", "position", "scale"}
+
+    def lua_files(self):
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or (HOME / ".config")) / "hypr"
+        if not base.exists():
+            return []
+
+        ## Skipped by name, because a copy of the config sitting in the same
+        ## folder is still a .lua file and every rule in it showed up twice
+        skip = ("bak", "backup", "old", "orig", "copy", "save", "disabled")
+
+        chosen = {}
+        for path in sorted(base.rglob("*.lua")):
+            if not path.is_file():
+                continue
+
+            lowered = path.name.lower()
+            if lowered.endswith("~"):
+                continue
+            if any(word in lowered for word in skip):
+                continue
+            if any(part.lower() in skip for part in path.parts):
+                continue
+
+            try:
+                resolved = str(path.resolve())
+            except Exception:
+                resolved = str(path)
+            if resolved in chosen:
+                continue
+
+            ## Identical content by a different name is a copy too
+            try:
+                digest = hashlib.sha1(path.read_bytes()).hexdigest()
+            except Exception:
+                digest = resolved
+            if digest in chosen:
+                continue
+
+            chosen[resolved] = path
+            chosen[digest] = path
+
+        seen = set()
+        out = []
+        for key in sorted(chosen):
+            path = chosen[key]
+            if str(path) in seen:
+                continue
+            seen.add(str(path))
+            out.append(path)
+        return out
+
+    def lua_blocks(self, text, call="hl.monitor"):
+        blocks = []
+        for m in re.finditer(re.escape(call) + r"\s*\(\s*\{", text):
+            depth = 0
+            i = m.end() - 1
+            while i < len(text):
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            if depth != 0:
+                continue
+            blocks.append({
+                "start": m.start(),
+                "end": i,
+                "inner_start": m.end(),
+                "inner_end": i,
+                "inner": text[m.end():i],
+            })
+        return blocks
+
+    def lua_fields(self, inner):
+        fields = {}
+        pattern = r'(\w+)\s*=\s*("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|[^,\n}]+)'
+        for fm in re.finditer(pattern, inner):
+            fields[fm.group(1)] = {
+                "raw": fm.group(2).strip().rstrip(",").strip(),
+                "span": fm.span(2),
+            }
+        return fields
+
+    def lua_unquote(self, raw):
+        if raw[:1] in ("'", '"') and raw[-1:] == raw[:1]:
+            return raw[1:-1]
+        return raw
+
+    def lua_value(self, key, value, previous_raw=None):
+        if previous_raw is not None:
+            quoted = previous_raw[:1] in ("'", '"')
+        else:
+            quoted = key in Utill.LUA_STRING_KEYS
+        if quoted:
+            return '"%s"' % str(value).replace('"', '\\"')
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value)
+
+    def lua_strip(self, text):
+        ## Brackets inside strings and comments are not structure. Counting them
+        ## made a perfectly valid config look unbalanced, because a single "("
+        ## in a comment or an exec_cmd string is enough to skew the totals.
+        out = []
+        i = 0
+        n = len(text)
+        while i < n:
+            ch = text[i]
+
+            if ch == "-" and text[i:i + 2] == "--":
+                if text[i:i + 4] == "--[[":
+                    close = text.find("]]", i + 4)
+                    i = n if close == -1 else close + 2
+                else:
+                    close = text.find("\n", i)
+                    i = n if close == -1 else close
+                continue
+
+            if text[i:i + 2] == "[[":
+                close = text.find("]]", i + 2)
+                i = n if close == -1 else close + 2
+                continue
+
+            if ch in ("'", '"'):
+                quote = ch
+                i += 1
+                while i < n:
+                    if text[i] == "\\":
+                        i += 2
+                        continue
+                    if text[i] == quote:
+                        i += 1
+                        break
+                    i += 1
+                continue
+
+            out.append(ch)
+            i += 1
+
+        return "".join(out)
+
+    def lua_balance(self, text):
+        stripped = self.lua_strip(text)
+        return (stripped.count("{") - stripped.count("}"),
+                stripped.count("(") - stripped.count(")"))
+
+    def lua_commit(self, path, new_text):
+        ## Compared against the original rather than demanding absolute balance,
+        ## so an edit is judged on what it changed, not on the file it inherited
+        before = self.lua_balance(path.read_text())
+        after = self.lua_balance(new_text)
+
+        if before != after:
+            return ("error:refused, edit changed bracket balance "
+                    "(braces %d->%d, parens %d->%d)"
+                    % (before[0], after[0], before[1], after[1]))
+
+        backup = path.with_suffix(path.suffix + ".bak-%d" % int(time.time()))
+        shutil.copy2(str(path), str(backup))
+        path.write_text(new_text)
+
+        ## Every drag release writes, so these accumulate quickly
+        try:
+            existing = sorted(path.parent.glob(path.name + ".bak-*"))
+            for stale in existing[:-5]:
+                stale.unlink()
+        except Exception:
+            pass
+
+        return "ok:" + str(backup)
+
+    ## ── PACKAGES ─────────────────────────────────────────────────────────────
+    ## Read only. Installing, updating and removing are handed to a terminal so
+    ## the command is visible and confirmed rather than run silently as root.
+
+    def pkg_run(self, args, timeout=30):
+        try:
+            return subprocess.run(args, capture_output=True, text=True,
+                                  timeout=timeout).stdout
+        except Exception:
+            return ""
+
+    def pkg_parse_qi(self, text):
+        ## pacman -Qi prints "Key : Value" blocks with indented continuations
+        packages = []
+        current = {}
+        key = ""
+        for line in text.split("\n"):
+            if not line.strip():
+                if current:
+                    packages.append(current)
+                    current = {}
+                    key = ""
+                continue
+            if line.startswith(" ") and key:
+                current[key] += " " + line.strip()
+                continue
+            if " : " in line:
+                key, value = line.split(" : ", 1)
+                key = key.strip()
+                current[key] = value.strip()
+            elif line.rstrip().endswith(":"):
+                key = line.rstrip().rstrip(":").strip()
+                current[key] = ""
+        if current:
+            packages.append(current)
+        return packages
+
+    @argfunc
+    def pkglist(self, *args):
+        rows = []
+
+        ## Explicitly installed, not pulled in as a dependency
+        explicit = self.pkg_run(["pacman", "-Qqe"]).split()
+        foreign = set(self.pkg_run(["pacman", "-Qqem"]).split())
+
+        if explicit:
+            info = self.pkg_run(["pacman", "-Qi"] + explicit, timeout=60)
+            for pkg in self.pkg_parse_qi(info):
+                name = pkg.get("Name", "")
+                if not name:
+                    continue
+                depends = pkg.get("Depends On", "")
+                if depends in ("None", ""):
+                    depends = ""
+                rows.append("\x1f".join([
+                    "aur" if name in foreign else "repo",
+                    name,
+                    pkg.get("Version", ""),
+                    pkg.get("Install Date", ""),
+                    pkg.get("Description", "").replace("\x1f", " "),
+                    depends.replace("\x1f", " "),
+                    pkg.get("Installed Size", ""),
+                ]))
+
+        ## Flatpak applications, not runtimes
+        flat = self.pkg_run(
+            ["flatpak", "list", "--app",
+             "--columns=application,name,version,origin,size"])
+        for line in flat.split("\n"):
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            rows.append("\x1f".join([
+                "flatpak",
+                parts[0].strip(),
+                parts[2].strip() if len(parts) > 2 else "",
+                "",
+                parts[1].strip(),
+                parts[3].strip() if len(parts) > 3 else "",
+                parts[4].strip() if len(parts) > 4 else "",
+            ]))
+
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def pkgupdates(self, *args):
+        rows = []
+
+        ## checkupdates does not touch the sync database, unlike pacman -Sy
+        for line in self.pkg_run(["checkupdates"], timeout=60).split("\n"):
+            parts = line.split()
+            if len(parts) >= 4 and parts[2] == "->":
+                rows.append("\x1f".join(["repo", parts[0], parts[1], parts[3]]))
+
+        helper = ""
+        for candidate in ("yay", "paru"):
+            if self.pkg_run(["which", candidate]).strip():
+                helper = candidate
+                break
+
+        if helper:
+            for line in self.pkg_run([helper, "-Qua"], timeout=90).split("\n"):
+                parts = line.split()
+                if len(parts) >= 4 and parts[2] == "->":
+                    rows.append("\x1f".join(["aur", parts[0], parts[1], parts[3]]))
+
+        for line in self.pkg_run(
+                ["flatpak", "remote-ls", "--updates", "--app",
+                 "--columns=application,version"], timeout=60).split("\n"):
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            rows.append("\x1f".join([
+                "flatpak", parts[0].strip(), "",
+                parts[1].strip() if len(parts) > 1 else "",
+            ]))
+
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def pkghelper(self, *args):
+        ## Which AUR helper is available, so the UI can say what it will run
+        for candidate in ("yay", "paru"):
+            if self.pkg_run(["which", candidate]).strip():
+                return candidate
+        return "none"
+
+    ## ── NETWORK ──────────────────────────────────────────────────────────────
+    ## nmcli with tabular output. Fields are escaped with backslashes rather
+    ## than quoted, so splitting has to respect them.
+
+    def nm_split(self, line):
+        out, current, escaped = [], "", False
+        for ch in line:
+            if escaped:
+                current += ch
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == ":":
+                out.append(current)
+                current = ""
+            else:
+                current += ch
+        out.append(current)
+        return out
+
+    def nm(self, args, timeout=12):
+        try:
+            return subprocess.run(["nmcli"] + args, capture_output=True,
+                                  text=True, timeout=timeout).stdout
+        except Exception:
+            return ""
+
+    @argfunc
+    def netdevices(self, *args):
+        text = self.nm(["-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"])
+        rows = []
+        for line in text.split("\n"):
+            if not line.strip():
+                continue
+            parts = self.nm_split(line)
+            if len(parts) < 4:
+                continue
+            if parts[1] in ("loopback",):
+                continue
+            rows.append("\x1f".join(parts[:4]))
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def netconnections(self, *args):
+        text = self.nm(["-t", "-f", "NAME,UUID,TYPE,DEVICE,ACTIVE", "connection", "show"])
+        rows = []
+        for line in text.split("\n"):
+            if not line.strip():
+                continue
+            parts = self.nm_split(line)
+            if len(parts) < 5:
+                continue
+            rows.append("\x1f".join(parts[:5]))
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def netwifi(self, *args):
+        text = self.nm(["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,BSSID",
+                        "device", "wifi", "list"], timeout=20)
+        rows = []
+        seen = []
+        for line in text.split("\n"):
+            if not line.strip():
+                continue
+            parts = self.nm_split(line)
+            if len(parts) < 4:
+                continue
+            ssid = parts[1].strip()
+            if not ssid or ssid in seen:
+                continue
+            seen.append(ssid)
+            rows.append("\x1f".join([
+                "yes" if parts[0].strip() == "*" else "no",
+                ssid,
+                parts[2].strip(),
+                parts[3].strip(),
+            ]))
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def netwifiscan(self, *args):
+        self.nm(["device", "wifi", "rescan"], timeout=20)
+        return "ok"
+
+    @argfunc
+    def netradio(self, *args):
+        ## --netradio            reports wifi on/off
+        ## --netradio on|off     sets it
+        if args and args[0] in ("on", "off"):
+            self.nm(["radio", "wifi", args[0]])
+            return "ok"
+        state = self.nm(["-t", "radio", "wifi"]).strip()
+        return state if state else "unknown"
+
+    @argfunc
+    def netconnect(self, *args):
+        if not args:
+            return "error:no target given"
+
+        if len(args) >= 2 and args[0] == "wifi":
+            ssid = args[1]
+            command = ["device", "wifi", "connect", ssid]
+            if len(args) > 2 and args[2]:
+                command += ["password", args[2]]
+            out = self.nm(command, timeout=45)
+        else:
+            out = self.nm(["connection", "up", args[0]], timeout=45)
+
+        lowered = out.lower()
+        if "successfully" in lowered:
+            return "ok"
+        return "error:" + (out.strip().split("\n")[-1] if out.strip() else "connection failed")
+
+    @argfunc
+    def netdisconnect(self, *args):
+        if not args:
+            return "error:no target given"
+        out = self.nm(["connection", "down", args[0]], timeout=30)
+        lowered = out.lower()
+        if "successfully" in lowered:
+            return "ok"
+        return "error:" + (out.strip().split("\n")[-1] if out.strip() else "disconnect failed")
+
+    @argfunc
+    def netforget(self, *args):
+        if not args:
+            return "error:no target given"
+        out = self.nm(["connection", "delete", args[0]], timeout=30)
+        if "successfully" in out.lower():
+            return "ok"
+        return "error:" + (out.strip().split("\n")[-1] if out.strip() else "delete failed")
+
+    ## ── MIME HANDLERS ────────────────────────────────────────────────────────
+
+    def mime_config_path(self):
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or (HOME / ".config"))
+        return base / "mimeapps.list"
+
+    def mime_read_defaults(self):
+        ## [Default Applications] in mimeapps.list is what the user has chosen
+        path = self.mime_config_path()
+        defaults = {}
+        if not path.exists():
+            return defaults
+
+        section = ""
+        for line in path.read_text(errors="replace").split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                section = stripped[1:-1]
+                continue
+            if section != "Default Applications" or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            entries = [v for v in value.strip().split(";") if v]
+            if entries:
+                defaults[key.strip()] = entries[0]
+        return defaults
+
+    def mime_read_added(self):
+        ## [Added Associations] is how an application is told it can open a type
+        ## it never declared. Without it a default silently does not apply.
+        path = self.mime_config_path()
+        added = {}
+        if not path.exists():
+            return added
+
+        section = ""
+        for line in path.read_text(errors="replace").split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                section = stripped[1:-1]
+                continue
+            if section != "Added Associations" or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            added[key.strip()] = [v for v in value.strip().split(";") if v]
+        return added
+
+    def mime_read_candidates(self):
+        ## mimeinfo.cache maps a type to every application that claims it
+        candidates = {}
+        roots = [
+            Path("/usr/share/applications"),
+            Path("/usr/local/share/applications"),
+            HOME / ".local/share/applications",
+            Path("/var/lib/flatpak/exports/share/applications"),
+            HOME / ".local/share/flatpak/exports/share/applications",
+        ]
+        for root in roots:
+            cache = root / "mimeinfo.cache"
+            if not cache.exists():
+                continue
+            for line in cache.read_text(errors="replace").split("\n"):
+                if "=" not in line or line.startswith("["):
+                    continue
+                key, value = line.split("=", 1)
+                for entry in value.strip().split(";"):
+                    if not entry:
+                        continue
+                    candidates.setdefault(key.strip(), [])
+                    if entry not in candidates[key.strip()]:
+                        candidates[key.strip()].append(entry)
+        return candidates
+
+    def mime_globs(self):
+        ## Extensions make a type far easier to recognise than its name alone
+        path = Path("/usr/share/mime/globs")
+        out = {}
+        if not path.exists():
+            return out
+        for line in path.read_text(errors="replace").split("\n"):
+            if not line or line.startswith("#") or ":" not in line:
+                continue
+            mime, pattern = line.split(":", 1)
+            pattern = pattern.strip()
+            if pattern.startswith("*."):
+                pattern = pattern[1:]
+            out.setdefault(mime.strip(), [])
+            if pattern not in out[mime.strip()] and len(out[mime.strip()]) < 6:
+                out[mime.strip()].append(pattern)
+        return out
+
+    def mime_all_types(self):
+        listing = Path("/usr/share/mime/types")
+        if listing.exists():
+            return [t.strip() for t in listing.read_text(errors="replace").split("\n") if t.strip()]
+        return []
+
+    @argfunc
+    def mimetypes(self, *args):
+        defaults = self.mime_read_defaults()
+        candidates = self.mime_read_candidates()
+        added = self.mime_read_added()
+
+        ## Anything claimed by hand is a candidate too
+        for mime, ids in added.items():
+            candidates.setdefault(mime, [])
+            for entry in ids:
+                if entry not in candidates[mime]:
+                    candidates[mime].append(entry)
+
+        known = self.mime_all_types()
+        for key in candidates:
+            if key not in known:
+                known.append(key)
+        for key in defaults:
+            if key not in known:
+                known.append(key)
+
+        globs = self.mime_globs()
+
+        rows = []
+        for mime in sorted(set(known)):
+            rows.append("\x1f".join([
+                mime,
+                defaults.get(mime, ""),
+                ",".join(candidates.get(mime, [])),
+                " ".join(globs.get(mime, [])),
+                ",".join(added.get(mime, [])),
+            ]))
+        return "\x1e".join(rows) if rows else "none"
+
+    def mime_write_sections(self, defaults, added):
+        path = self.mime_config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        lines = path.read_text(errors="replace").split("\n") if path.exists() else []
+
+        managed = ("Default Applications", "Added Associations")
+        out = []
+        in_managed = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                in_managed = stripped[1:-1] in managed
+                if in_managed:
+                    continue
+                out.append(line)
+                continue
+            if in_managed:
+                continue
+            out.append(line)
+
+        while out and out[-1].strip() == "":
+            out.pop()
+
+        if added:
+            if out:
+                out.append("")
+            out.append("[Added Associations]")
+            for key in sorted(added):
+                if added[key]:
+                    out.append("%s=%s;" % (key, ";".join(added[key])))
+
+        if out:
+            out.append("")
+        out.append("[Default Applications]")
+        for key in sorted(defaults):
+            out.append("%s=%s" % (key, defaults[key]))
+
+        text = "\n".join(out)
+        if not text.endswith("\n"):
+            text += "\n"
+
+        if path.exists():
+            backup = path.with_suffix(path.suffix + ".bak-%d" % int(time.time()))
+            shutil.copy2(str(path), str(backup))
+            try:
+                stale = sorted(path.parent.glob(path.name + ".bak-*"))
+                for old in stale[:-5]:
+                    old.unlink()
+            except Exception:
+                pass
+
+        path.write_text(text)
+        return "ok"
+
+    def mime_write_defaults(self, defaults):
+        path = self.mime_config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        lines = path.read_text(errors="replace").split("\n") if path.exists() else []
+
+        ## Drop the old section entirely, header included, then append a fresh
+        ## one. Emitting the existing header and appending another produced two
+        ## [Default Applications] blocks.
+        out = []
+        in_section = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                in_section = stripped[1:-1] == "Default Applications"
+                if in_section:
+                    continue
+                out.append(line)
+                continue
+            if in_section:
+                continue
+            out.append(line)
+
+        while out and out[-1].strip() == "":
+            out.pop()
+
+        if out:
+            out.append("")
+        out.append("[Default Applications]")
+        for key in sorted(defaults):
+            out.append("%s=%s" % (key, defaults[key]))
+
+        text = "\n".join(out)
+        if not text.endswith("\n"):
+            text += "\n"
+
+        if path.exists():
+            backup = path.with_suffix(path.suffix + ".bak-%d" % int(time.time()))
+            shutil.copy2(str(path), str(backup))
+            try:
+                stale = sorted(path.parent.glob(path.name + ".bak-*"))
+                for old in stale[:-5]:
+                    old.unlink()
+            except Exception:
+                pass
+
+        path.write_text(text)
+        return "ok"
+
+    @argfunc
+    def mimeset(self, *args):
+        ## --mimeset <type> <desktopid> [claim]
+        if len(args) < 2:
+            return "error:not enough arguments"
+
+        mime, desktop = args[0], args[1]
+        claim = len(args) > 2 and args[2] == "claim"
+
+        defaults = self.mime_read_defaults()
+        added = self.mime_read_added()
+        candidates = self.mime_read_candidates()
+
+        defaults[mime] = desktop
+
+        ## An application that never declared this type needs an explicit
+        ## association, otherwise the default is ignored
+        declared = desktop in candidates.get(mime, [])
+        if claim or not declared:
+            added.setdefault(mime, [])
+            if desktop not in added[mime]:
+                added[mime].insert(0, desktop)
+
+        return self.mime_write_sections(defaults, added)
+
+    @argfunc
+    def mimeclear(self, *args):
+        if not args:
+            return "error:no type given"
+
+        mime = args[0]
+        drop_claim = len(args) > 1 and args[1] == "unclaim"
+
+        defaults = self.mime_read_defaults()
+        added = self.mime_read_added()
+
+        if mime in defaults:
+            del defaults[mime]
+        if drop_claim and mime in added:
+            del added[mime]
+
+        return self.mime_write_sections(defaults, added)
+
+    ## ── LUA KEYBINDS ─────────────────────────────────────────────────────────
+
+    def lua_split_args(self, inner):
+        args, depth, start, i, n = [], 0, 0, 0, len(inner)
+        while i < n:
+            ch = inner[i]
+            if ch in ("'", '"'):
+                quote = ch
+                i += 1
+                while i < n:
+                    if inner[i] == "\\":
+                        i += 2
+                        continue
+                    if inner[i] == quote:
+                        break
+                    i += 1
+            elif ch in "({[":
+                depth += 1
+            elif ch in ")}]":
+                depth -= 1
+            elif ch == "," and depth == 0:
+                args.append(inner[start:i].strip())
+                start = i + 1
+            i += 1
+        tail = inner[start:].strip()
+        if tail:
+            args.append(tail)
+        return args
+
+    def lua_calls(self, text, call="hl.bind"):
+        out = []
+        for m in re.finditer(re.escape(call) + r"\s*\(", text):
+            depth, i, n = 0, m.end() - 1, len(text)
+            while i < n:
+                ch = text[i]
+                if ch in ("'", '"'):
+                    quote = ch
+                    i += 1
+                    while i < n:
+                        if text[i] == "\\":
+                            i += 2
+                            continue
+                        if text[i] == quote:
+                            break
+                        i += 1
+                elif ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            if depth != 0:
+                continue
+            out.append({
+                "start": m.start(),
+                "end": i + 1,
+                "inner": text[m.end():i],
+                "line": text[:m.start()].count("\n") + 1,
+            })
+        return out
+
+    def lua_consts(self, text):
+        out = {}
+        for m in re.finditer(r'local\s+(\w+)\s*=\s*"([^"]*)"', text):
+            out[m.group(1)] = m.group(2)
+        return out
+
+    def lua_key_display(self, expr, consts):
+        parts = [p.strip() for p in expr.split("..")]
+        resolved = []
+        for part in parts:
+            if part[:1] in ("'", '"') and part[-1:] == part[:1]:
+                resolved.append(part[1:-1])
+            elif part in consts:
+                resolved.append(consts[part])
+            else:
+                resolved.append(part)
+        return re.sub(r"\s*\+\s*", " + ", "".join(resolved).strip())
+
+    def lua_key_expr(self, display, consts):
+        ## Rebuild using whatever constant the config already uses, so edits keep
+        ## the author's style instead of inlining SUPER everywhere
+        for name, value in consts.items():
+            if display == value:
+                return name
+            if display.startswith(value + " + "):
+                rest = display[len(value):]
+                return '%s .. "%s"' % (name, rest)
+        return '"%s"' % display.replace('"', '\\"')
+
+    def lua_action_kind(self, expr):
+        m = re.match(r'hl\.dsp\.exec_cmd\(\s*"((?:[^"\\]|\\.)*)"\s*\)$', expr.strip())
+        if m:
+            return "exec", m.group(1)
+        m = re.match(r"hl\.dsp\.([\w.]+)", expr.strip())
+        if m:
+            return m.group(1), ""
+        return "raw", expr.strip()
+
+    ## ── LUA STARTUP BLOCK ────────────────────────────────────────────────────
+    ## hl.on("hyprland.start", function() ... end) — edits stay inside that body
+
+    def lua_startup_body(self, text):
+        ## The walk has to start on the opening paren, not after the first
+        ## argument, or the depth counter never opens and the scan runs off
+        for m in re.finditer(r'hl\.on\s*\(', text):
+            after = text[m.end():m.end() + 40]
+            if '"hyprland.start"' not in after and "'hyprland.start'" not in after:
+                continue
+            depth, i, n = 0, m.end() - 1, len(text)
+            while i < n:
+                ch = text[i]
+                if ch in ("'", '"'):
+                    quote = ch
+                    i += 1
+                    while i < n:
+                        if text[i] == "\\":
+                            i += 2
+                            continue
+                        if text[i] == quote:
+                            break
+                        i += 1
+                elif ch == "(":
+                    depth += 1
+                elif ch == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            if depth != 0:
+                continue
+
+            call_end = i
+            body_open = text.find("function", m.end())
+            if body_open == -1 or body_open > call_end:
+                continue
+            body_open = text.find(")", body_open)
+            body_close = text.rfind("end", body_open, call_end)
+            if body_open == -1 or body_close == -1:
+                continue
+            return {
+                "start": m.start(),
+                "end": call_end + 1,
+                "body_start": body_open + 1,
+                "body_end": body_close,
+            }
+        return None
+
+    @argfunc
+    def luastartup(self, *args):
+        rows = []
+        for path in self.lua_files():
+            try:
+                text = path.read_text(errors="replace")
+            except Exception:
+                continue
+            block = self.lua_startup_body(text)
+            if not block:
+                continue
+
+            body = text[block["body_start"]:block["body_end"]]
+            offset = block["body_start"]
+            for m in re.finditer(r'hl\.exec_cmd\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)', body):
+                line = text[:offset + m.start()].count("\n") + 1
+                rows.append("\x1f".join([str(path), str(line), m.group(1)]))
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def luaaddstartup(self, *args):
+        if not args:
+            return "error:no command given"
+        command = args[0]
+
+        for path in self.lua_files():
+            try:
+                text = path.read_text(errors="replace")
+            except Exception:
+                continue
+            block = self.lua_startup_body(text)
+            if not block:
+                continue
+
+            body = text[block["body_start"]:block["body_end"]]
+            indent = "    "
+            im = re.search(r"\n(\s+)hl\.exec_cmd", body)
+            if im:
+                indent = im.group(1)
+
+            trimmed = body.rstrip()
+            if not trimmed.endswith("\n"):
+                trimmed += "\n"
+            addition = '%shl.exec_cmd("%s")\n' % (indent, command.replace('"', '\\"'))
+
+            new_body = body.rstrip("\n \t") + "\n" + addition
+            new_text = (text[:block["body_start"]] + new_body
+                        + text[block["body_end"]:])
+            return self.lua_commit(path, new_text)
+
+        return "error:no hyprland.start block found"
+
+    @argfunc
+    def luadeletestartup(self, *args):
+        if len(args) < 2:
+            return "error:not enough arguments"
+
+        path = Path(args[0])
+        line = int(args[1])
+        if not path.exists():
+            return "error:no such file"
+
+        text = path.read_text()
+        lines = text.split("\n")
+        if line < 1 or line > len(lines):
+            return "error:line out of range"
+        if "hl.exec_cmd" not in lines[line - 1]:
+            return "error:no hl.exec_cmd on that line"
+
+        del lines[line - 1]
+        return self.lua_commit(path, "\n".join(lines))
+
+    @argfunc
+    def luawritestartup(self, *args):
+        if len(args) < 3:
+            return "error:not enough arguments"
+
+        path = Path(args[0])
+        line = int(args[1])
+        command = args[2]
+        if not path.exists():
+            return "error:no such file"
+
+        text = path.read_text()
+        lines = text.split("\n")
+        if line < 1 or line > len(lines):
+            return "error:line out of range"
+
+        current = lines[line - 1]
+        if "hl.exec_cmd" not in current:
+            return "error:no hl.exec_cmd on that line"
+
+        indent = re.match(r"\s*", current).group(0)
+        lines[line - 1] = '%shl.exec_cmd("%s")' % (indent, command.replace('"', '\\"'))
+        return self.lua_commit(path, "\n".join(lines))
+
+    @argfunc
+    def luabinds(self, *args):
+        rows = []
+        for path in self.lua_files():
+            try:
+                text = path.read_text(errors="replace")
+            except Exception:
+                continue
+            consts = self.lua_consts(text)
+            for call in self.lua_calls(text):
+                parts = self.lua_split_args(call["inner"])
+                if len(parts) < 2:
+                    continue
+                kind, detail = self.lua_action_kind(parts[1])
+                rows.append("\x1f".join([
+                    str(path),
+                    str(call["line"]),
+                    self.lua_key_display(parts[0], consts),
+                    kind,
+                    detail,
+                    parts[1],
+                    parts[2] if len(parts) > 2 else "",
+                ]))
+        return "\x1e".join(rows) if rows else "none"
+
+    def lua_bind_text(self, key_expr, action_expr, options_expr):
+        out = "hl.bind(%s, %s" % (key_expr, action_expr)
+        if options_expr:
+            out += ", %s" % options_expr
+        return out + ")"
+
+    @argfunc
+    def luawritebind(self, *args):
+        ## --luawritebind <file> <line> <key> <action> [options]
+        if len(args) < 4:
+            return "error:not enough arguments"
+
+        path = Path(args[0])
+        line = int(args[1])
+        key_display = args[2]
+        action_expr = args[3]
+        options_expr = args[4] if len(args) > 4 else ""
+
+        if not path.exists():
+            return "error:no such file"
+
+        text = path.read_text()
+        consts = self.lua_consts(text)
+
+        target = None
+        for call in self.lua_calls(text):
+            if call["line"] == line:
+                target = call
+                break
+        if target is None:
+            return "error:no hl.bind on that line"
+
+        replacement = self.lua_bind_text(
+            self.lua_key_expr(key_display, consts), action_expr, options_expr)
+        new_text = text[:target["start"]] + replacement + text[target["end"]:]
+        return self.lua_commit(path, new_text)
+
+    @argfunc
+    def luadeletebind(self, *args):
+        if len(args) < 2:
+            return "error:not enough arguments"
+
+        path = Path(args[0])
+        line = int(args[1])
+        if not path.exists():
+            return "error:no such file"
+
+        text = path.read_text()
+        target = None
+        for call in self.lua_calls(text):
+            if call["line"] == line:
+                target = call
+                break
+        if target is None:
+            return "error:no hl.bind on that line"
+
+        begin = text.rfind("\n", 0, target["start"]) + 1
+        finish = target["end"]
+        while finish < len(text) and text[finish] != "\n":
+            finish += 1
+        finish += 1
+
+        return self.lua_commit(path, text[:begin] + text[finish:])
+
+    @argfunc
+    def luaaddbind(self, *args):
+        ## --luaaddbind <key> <action> [options] — grouped after the last bind
+        if len(args) < 2:
+            return "error:not enough arguments"
+
+        key_display = args[0]
+        action_expr = args[1]
+        options_expr = args[2] if len(args) > 2 else ""
+
+        target_path = None
+        last_call = None
+        for path in self.lua_files():
+            try:
+                text = path.read_text(errors="replace")
+            except Exception:
+                continue
+            calls = self.lua_calls(text)
+            if calls:
+                target_path = path
+                last_call = calls[-1]
+
+        if target_path is None:
+            return "error:no hl.bind calls found to group with"
+
+        text = target_path.read_text()
+        consts = self.lua_consts(text)
+        replacement = self.lua_bind_text(
+            self.lua_key_expr(key_display, consts), action_expr, options_expr)
+
+        insert_at = last_call["end"]
+        while insert_at < len(text) and text[insert_at] != "\n":
+            insert_at += 1
+        insert_at += 1
+
+        return self.lua_commit(target_path, text[:insert_at] + replacement + "\n" + text[insert_at:])
+
+    @argfunc
+    def luamonitors(self, *args):
+        rows = []
+        for path in self.lua_files():
+            try:
+                text = path.read_text(errors="replace")
+            except Exception:
+                continue
+            for b in self.lua_blocks(text):
+                fields = self.lua_fields(b["inner"])
+                if "output" not in fields:
+                    continue
+                flat = ";".join(
+                    "%s=%s" % (k, self.lua_unquote(v["raw"]))
+                    for k, v in fields.items()
+                )
+                rows.append("\x1f".join([
+                    str(path),
+                    str(text[:b["start"]].count("\n") + 1),
+                    self.lua_unquote(fields["output"]["raw"]),
+                    flat,
+                ]))
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def luawritemonitor(self, *args):
+        ## --luawritemonitor <output> key=value key=value ...
+        if len(args) < 2:
+            return "error:no fields given"
+
+        output = args[0]
+        updates = {}
+        for pair in args[1:]:
+            if "=" not in pair:
+                continue
+            key, value = pair.split("=", 1)
+            updates[key] = value
+
+        target_path = None
+        target_block = None
+        last_path = None
+        last_block = None
+
+        for path in self.lua_files():
+            try:
+                text = path.read_text(errors="replace")
+            except Exception:
+                continue
+            for b in self.lua_blocks(text):
+                fields = self.lua_fields(b["inner"])
+                if "output" not in fields:
+                    continue
+                last_path, last_block = path, b
+                if self.lua_unquote(fields["output"]["raw"]) == output:
+                    target_path, target_block = path, b
+
+        if target_path is None:
+            if last_path is None:
+                return "error:no hl.monitor rules found to group with"
+            return self.lua_append_monitor(last_path, last_block, output, updates)
+
+        text = target_path.read_text()
+        inner = target_block["inner"]
+        fields = self.lua_fields(inner)
+
+        edits = []
+        additions = []
+        for key, value in updates.items():
+            if key in fields:
+                edits.append((fields[key]["span"],
+                              self.lua_value(key, value, fields[key]["raw"])))
+            else:
+                additions.append((key, value))
+
+        for (begin, finish), replacement in sorted(edits, key=lambda e: -e[0][0]):
+            inner = inner[:begin] + replacement + inner[finish:]
+
+        if additions:
+            indent = "    "
+            im = re.search(r"\n(\s*)\w+\s*=", target_block["inner"])
+            if im:
+                indent = im.group(1)
+            stripped = inner.rstrip()
+            if not stripped.endswith(","):
+                stripped += ","
+            for key, value in additions:
+                stripped += "\n%s%s = %s," % (indent, key, self.lua_value(key, value))
+            inner = stripped + "\n"
+
+        new_text = (text[:target_block["inner_start"]] + inner
+                    + text[target_block["inner_end"]:])
+        return self.lua_commit(target_path, new_text)
+
+    def lua_append_monitor(self, path, last_block, output, updates):
+        text = path.read_text()
+        body = ['    output = "%s",' % output]
+        for key, value in updates.items():
+            body.append("    %s = %s," % (key, self.lua_value(key, value)))
+        block = "hl.monitor({\n" + "\n".join(body) + "\n})\n"
+
+        insert_at = last_block["end"]
+        while insert_at < len(text) and text[insert_at] != "\n":
+            insert_at += 1
+        insert_at += 1
+
+        new_text = text[:insert_at] + "\n" + block + text[insert_at:]
+        return self.lua_commit(path, new_text)
 
     @argfunc
     def getcommands(self, *args):
@@ -781,7 +2049,28 @@ class Utill():
         name = ''
         for line in result.stdout.splitlines():
             if 'Name:' in line: name = line.split('Name:', 1)[1].strip(); break
-        return f"powered:{powered},scanning:{scanning},discoverable:{discoverable},name:{name}"
+
+        ## Connected devices were never reported, so anything reading this
+        ## always believed nothing was connected
+        connected = 0
+        first = ''
+        try:
+            listing = subprocess.run(['bluetoothctl', 'devices', 'Connected'],
+                                     capture_output=True, text=True, timeout=6).stdout
+            for line in listing.splitlines():
+                line = line.strip()
+                if not line.startswith('Device '):
+                    continue
+                connected += 1
+                if not first:
+                    parts = line.split(' ', 2)
+                    first = parts[2].strip() if len(parts) > 2 else ''
+        except Exception:
+            pass
+
+        first = first.replace(',', ' ')
+        return (f"powered:{powered},scanning:{scanning},discoverable:{discoverable},"
+                f"connected:{connected},device:{first},name:{name}")
 
     @argfunc
     def btdevices(self, *args):
