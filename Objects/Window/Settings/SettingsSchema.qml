@@ -287,6 +287,31 @@ QtObject {
                     title: "Network",
                     items: [
                         {
+                            key: "widgets.dateStyle", type: "segmented", label: "Date Style",
+                            description: "A calendar leaf, or month over day",
+                            options: [
+                                { label: "Leaf", value: "leaf" },
+                                { label: "Plain", value: "plain" }
+                            ],
+                            fallback: "leaf"
+                        },
+                        {
+                            key: "widgets.volumeIcon", type: "switch", label: "Volume Icon",
+                            description: "Show the speaker glyph beside the level",
+                            fallback: true
+                        },
+                        {
+                            key: "widgets.volumeStyle", type: "segmented", label: "Volume Style",
+                            description: "How the level is shown next to the icon",
+                            options: [
+                                { label: "Icon", value: "icon" },
+                                { label: "Text", value: "text" },
+                                { label: "Dots", value: "dots" },
+                                { label: "Meter", value: "meter" }
+                            ],
+                            fallback: "text"
+                        },
+                        {
                             key: "widgets.networkStyle", type: "segmented", label: "Network Style",
                             description: "Dots show live up and down throughput",
                             options: [

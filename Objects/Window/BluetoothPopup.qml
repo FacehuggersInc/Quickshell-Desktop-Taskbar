@@ -114,6 +114,7 @@ PopupWindow {
         repeat: false
         onTriggered: {
             bluetoothPopup.scanning = false
+            bluetoothPopup.pruneScanResults()
             scanProc.command = root.newUtill(["--btscan", "off"])
             scanProc.running = true
             scanStatusText.text = "Scan complete"
@@ -147,8 +148,16 @@ PopupWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 var text = this.text.trim()
-                bluetoothPopup.pairedDevices = []
-                if (text === "none" || text === "") return
+
+                // Not cleared up front. A slow or failed read used to blank the
+                // list before the replacement arrived, so the panel flickered
+                // empty every refresh.
+                if (text === "") return
+                if (text === "none") {
+                    bluetoothPopup.pairedDevices = []
+                    return
+                }
+
                 var lines = text.split("\n")
                 var devs = []
                 for (var i = 0; i < lines.length; i++) {
@@ -174,16 +183,44 @@ PopupWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 var text = this.text.trim()
-                bluetoothPopup.scanResults = []
-                if (text === "none" || text === "") return
-                var lines = text.split("\n")
-                var results = []
-                for (var i = 0; i < lines.length; i++) {
-                    var parts = lines[i].split("|")
-                    if (parts.length < 2) continue
-                    results.push({ mac: parts[0], name: parts[1] })
+                if (text === "") return
+
+                // ## Merge, do not replace
+                // bluetoothctl reports whatever it happens to hear in that
+                // moment, so a device drops out of one poll and returns in the
+                // next. Replacing the list made it flicker; this accumulates
+                // and marks what is currently audible.
+
+                var fresh = ({})
+                if (text !== "none") {
+                    var lines = text.split("\n")
+                    for (var i = 0; i < lines.length; i++) {
+                        var parts = lines[i].split("|")
+                        if (parts.length < 2) continue
+                        fresh[parts[0]] = parts[1]
+                    }
                 }
-                bluetoothPopup.scanResults = results
+
+                var merged = []
+                var seen = []
+                var existing = bluetoothPopup.scanResults
+
+                for (var j = 0; j < existing.length; j++) {
+                    var known = existing[j]
+                    seen.push(known.mac)
+                    merged.push({
+                        mac: known.mac,
+                        name: fresh[known.mac] ? fresh[known.mac] : known.name,
+                        present: fresh[known.mac] !== undefined
+                    })
+                }
+
+                for (var mac in fresh) {
+                    if (seen.indexOf(mac) !== -1) continue
+                    merged.push({ mac: mac, name: fresh[mac], present: true })
+                }
+
+                bluetoothPopup.scanResults = merged
             }
         }
     }
@@ -212,6 +249,39 @@ PopupWindow {
     Process { id: scanProc }
 
     // ── Data functions ────────────────────────────────────────────
+    // Once scanning ends, drop anything that was not audible in the final
+    // sweep and is not already paired. Everything else is kept.
+    function pruneScanResults() {
+        var kept = []
+        var results = bluetoothPopup.scanResults
+        for (var i = 0; i < results.length; i++) {
+            var entry = results[i]
+            if (entry.present === false && !bluetoothPopup.isPaired(entry.mac))
+                continue
+            kept.push(entry)
+        }
+        bluetoothPopup.scanResults = kept
+    }
+
+    function isPaired(mac) {
+        var devices = bluetoothPopup.pairedDevices
+        for (var i = 0; i < devices.length; i++) {
+            if (devices[i].mac === mac)
+                return true
+        }
+        return false
+    }
+
+    readonly property var connectedDevices: {
+        var out = []
+        var devices = bluetoothPopup.pairedDevices
+        for (var i = 0; i < devices.length; i++) {
+            if (devices[i].connected)
+                out.push(devices[i])
+        }
+        return out
+    }
+
     function fetchState()       { if (!stateProc.running)       stateProc.running = true }
     function fetchDevices()     { if (!devicesProc.running)     devicesProc.running = true }
     function fetchScanResults() { if (!scanResultsProc.running) scanResultsProc.running = true }
@@ -400,6 +470,7 @@ PopupWindow {
 
             // ── Scrollable content ────────────────────────────────
             ScrollView {
+                id: btScroll
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -408,8 +479,82 @@ PopupWindow {
 
                 ColumnLayout {
                     id: contentColumn
-                    width: panelWidth - 24
+                    width: btScroll.availableWidth
                     spacing: 4
+
+                    // ── Connected ─────────────────────────────────
+                    // What is actually in use, ahead of everything else. It
+                    // used to be buried among the paired devices.
+                    SectionLabel {
+                        text: "Connected"
+                        Layout.fillWidth: true
+                        visible: bluetoothPopup.connectedDevices.length > 0
+                    }
+
+                    Repeater {
+                        model: bluetoothPopup.connectedDevices
+
+                        delegate: Rectangle {
+                            required property var modelData
+
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 48
+                            radius: Theme.radiusSmall
+                            color: Theme.alpha(Theme.accent, 0.16)
+                            border.width: Theme.borderWidth
+                            border.color: Theme.accentLine
+
+                            Icon {
+                                id: connectedIcon
+                                anchors.left: parent.left
+                                anchors.leftMargin: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                iconName: "bluetooth"
+                                iconSize: 18
+                                color: Theme.accentIcon
+                            }
+
+                            Column {
+                                anchors.left: connectedIcon.right
+                                anchors.leftMargin: 10
+                                anchors.right: disconnectButton.left
+                                anchors.rightMargin: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 1
+
+                                Text {
+                                    width: parent.width
+                                    text: modelData.alias ? modelData.alias : modelData.name
+                                    elide: Text.ElideRight
+                                    color: Theme.text
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.labelSize
+                                    font.weight: 600
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: modelData.battery && modelData.battery !== ""
+                                        ? "Battery " + modelData.battery
+                                        : modelData.mac
+                                    elide: Text.ElideRight
+                                    color: Theme.textMute
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Theme.descSize
+                                }
+                            }
+
+                            ActionButton {
+                                id: disconnectButton
+                                anchors.right: parent.right
+                                anchors.rightMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                label: "Disconnect"
+                                busy: bluetoothPopup.connectingMac === modelData.mac
+                                onActivated: bluetoothPopup.disconnectDevice(modelData.mac)
+                            }
+                        }
+                    }
 
                     // ── Paired devices ────────────────────────────
                     SectionLabel {
@@ -535,7 +680,16 @@ PopupWindow {
                     }
 
                     Repeater {
-                        model: bluetoothPopup.scanResults
+                        // Paired devices already have a row above
+                        model: {
+                            var out = []
+                            var results = bluetoothPopup.scanResults
+                            for (var i = 0; i < results.length; i++) {
+                                if (!bluetoothPopup.isPaired(results[i].mac))
+                                    out.push(results[i])
+                            }
+                            return out
+                        }
 
                         delegate: RoundedBlock {
                             required property var modelData

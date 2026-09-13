@@ -2,6 +2,7 @@ import QtQuick
 
 import qs.Objects.Design
 import qs.Objects.Theme
+import qs.Objects.Systems
 import qs.Objects.Widgets.Internal
 
 Item {
@@ -53,20 +54,76 @@ Item {
         onTriggered: clock.tick()
     }
 
+    Component.onCompleted: root.clockAnchor = clock
+
+    // ## Alert
+    // The dots pulse when an alarm, timer or reminder goes off, so the bar
+    // itself shows something happened
+    property bool alerting: false
+    property color pulseColour: Theme.accentText
+
+    Connections {
+        target: root
+        function onAlertPulseChanged() {
+            clock.alerting = true
+            alertSettle.restart()
+        }
+    }
+
+    Timer {
+        id: alertSettle
+        interval: 4000
+        onTriggered: clock.alerting = false
+    }
+
+    SequentialAnimation {
+        running: clock.alerting
+        loops: Animation.Infinite
+
+        ColorAnimation {
+            target: clock
+            property: "pulseColour"
+            from: Theme.accentText
+            to: Theme.warn
+            duration: 420
+        }
+
+        ColorAnimation {
+            target: clock
+            property: "pulseColour"
+            from: Theme.warn
+            to: Theme.accentText
+            duration: 420
+        }
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        cursorShape: Qt.PointingHandCursor
+        onClicked: {
+            if (root.clockWindow) root.clockWindow.open("")
+        }
+    }
+
     Row {
         id: content
         anchors.centerIn: parent
         spacing: 5
 
         DotMatrix {
+            id: timeMatrix
             anchors.verticalCenter: parent.verticalCenter
             visible: clock.style === "dots"
             text: clock.style === "dots" ? clock.timeText : ""
             dotSize: 2.5
             dotGap: 1.5
             charGap: 4
-            onColor: Theme.accentText
+            shadowSpread: 2
+            // The digits empty from the bottom as the last minute runs down,
+            // then flash when it fires
+            onColor: clock.alerting ? clock.pulseColour : Theme.accentText
             offColor: Theme.alpha(Theme.textBase, 0.07)
+            drain: clock.alerting ? -1 : ClockSystem.drain
         }
 
         Text {
@@ -79,16 +136,16 @@ Item {
             font.pixelSize: 17
         }
 
-        // Meridiem follows whichever style the time is using, at a smaller
-        // dot size so it stays subordinate to the digits
+        // Same dot density as the time. It was drawn smaller, which read as a
+        // different typeface rather than as a subordinate element.
         DotMatrix {
             anchors.verticalCenter: parent.verticalCenter
             visible: clock.style === "dots" && clock.meridiem !== ""
             text: clock.style === "dots" ? clock.meridiem : ""
-            dotSize: 1.5
-            dotGap: 1
-            charGap: 2
-            shadowSpread: 1.5
+            dotSize: timeMatrix.dotSize
+            dotGap: timeMatrix.dotGap
+            charGap: timeMatrix.charGap
+            shadowSpread: timeMatrix.shadowSpread
             onColor: Theme.textDim
             offColor: Theme.alpha(Theme.textBase, 0.05)
         }
@@ -100,7 +157,7 @@ Item {
             color: Theme.textMute
             font.family: Theme.fontFamily
             font.weight: 700
-            font.pixelSize: 9
+            font.pixelSize: 13
         }
     }
 }

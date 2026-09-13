@@ -6,7 +6,19 @@ QtObject {
     id: sys
 
     property var binds: []
+    property var consts: []
     property bool scanned: false
+
+    // "mainMod + Space" and "SUPER + Space" both write back as
+    // mainMod .. " + Space", so either can be typed into the one field
+    readonly property string constHint: {
+        if (sys.consts.length === 0)
+            return ""
+        var parts = []
+        for (var i = 0; i < sys.consts.length; i++)
+            parts.push(sys.consts[i].name + " = " + sys.consts[i].value)
+        return parts.join("   ")
+    }
 
     signal readRequested()
     signal addRequested(string key, string command)

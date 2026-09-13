@@ -10,6 +10,7 @@ import QtQuick.Layouts
 import qs.Objects.Design
 import qs.Objects.Widgets
 import qs.Objects.Theme
+import qs.Objects.Systems
 import qs.Objects.Window.Settings
 
 
@@ -39,16 +40,40 @@ PanelWindow {
     readonly property bool fullWidth: barConfig.style === "full"
 
     readonly property var leftWidgets:
-        barConfig.left !== undefined ? barConfig.left : ["workspaces"]
+        barConfig.left !== undefined ? barConfig.left : ["menu", "workspaces"]
     readonly property var centerWidgets:
         barConfig.center !== undefined ? barConfig.center : ["appbar"]
+
+    // The app bar keeps its own block because it grows with your windows, so
+    // the centre is split around it — anything listed before it sits to its
+    // left, which the single trailing block made impossible.
+    readonly property int appbarIndex: mainWindow.centerWidgets.indexOf("appbar")
+
+    readonly property var centerBefore: {
+        var out = []
+        var stop = mainWindow.appbarIndex === -1
+            ? mainWindow.centerWidgets.length : mainWindow.appbarIndex
+        for (var i = 0; i < stop; i++)
+            out.push(mainWindow.centerWidgets[i])
+        return out
+    }
+
+    readonly property var centerAfter: {
+        var out = []
+        if (mainWindow.appbarIndex === -1)
+            return out
+        for (var i = mainWindow.appbarIndex + 1; i < mainWindow.centerWidgets.length; i++)
+            out.push(mainWindow.centerWidgets[i])
+        return out
+    }
     readonly property var rightWidgets:
         barConfig.right !== undefined ? barConfig.right
-            : ["clock", "date", "separator", "volume", "network", "bluetooth", "tray", "notifications"]
+            : ["media", "clock", "date", "separator", "volume", "mic",
+               "network", "bluetooth", "tray", "notifications"]
 
     // Anything opened from the quick panel anchors here, since the widget that
     // owns the popup may not be the one that asked for it
-    property var settingsAnchor: null
+    property var settingsAnchor: root.menuAnchor
 
     // Popups anchor under a top bar and above a bottom one
     function popupOffset(popupHeight) {
@@ -67,7 +92,9 @@ PanelWindow {
             ? [ fullBar.blurRegion ]
             : [
                 leftModules.blurRegion,
+                centerLeading.blurRegion,
                 appbar.blurRegion,
+                centerModules.blurRegion,
                 rightModules.blurRegion
             ]
     }
@@ -84,7 +111,10 @@ PanelWindow {
 
     // ── Gaming mode ─────────────────────────────────────────────────
     property bool gamingMode: root.settings.gaming ? root.settings.gaming.enabled : false
-    property int  gamingBarHeight: root.settings.gaming ? (root.settings.gaming.barHeight || 14) : 14
+    readonly property int gamingBarHeight: {
+        var bump = root.settingsRevision
+        return root.settings.gaming ? (root.settings.gaming.barHeight || 14) : 14
+    }
     property bool gamingBarRevealed: false
 
     // Height of the bar window in normal mode.
@@ -139,6 +169,81 @@ PanelWindow {
         Component.onCompleted: root.bluetoothPopup = sharedBluetoothPopup
     }
 
+    QuickSettingsPopup {
+        id: quickSettingsPopup
+        onOpenFullSettings: settingsWindow.open()
+        onOpenPower: powerPopupWin.open()
+        onOpenSettingsPage: (page) => {
+            if (page !== "")
+                settingsWindow.pageId = page
+            settingsWindow.open()
+        }
+    }
+
+    PowerPopup {
+        id: powerPopupWin
+    }
+
+    SettingsWindow {
+        id: settingsWindow
+    }
+
+    CalendarWindow {
+        id: calendarWindow
+        Component.onCompleted: root.calendarWindow = calendarWindow
+    }
+
+    ClockWindow {
+        id: clockWindow
+        Component.onCompleted: root.clockWindow = clockWindow
+    }
+
+    AlertWindow {
+        id: alertWindow
+    }
+
+    AlertPopup {
+        id: alertPopup
+    }
+
+    // Full screen when opted in, the quiet popup otherwise — and either way the
+    // clock widget animates so the bar itself shows something happened
+    Connections {
+        target: ClockSystem
+
+        function onAlert(kind, label, popup) {
+            root.alertPulse = Date.now()
+
+            if (popup) {
+                alertWindow.show(kind, label)
+                return
+            }
+
+            root.notify("Clock", label, "history")
+            alertPopup.show(kind, label,
+                root.clockAnchor ? root.clockAnchor : mainWindow.settingsAnchor)
+        }
+    }
+
+    // ## Menu
+    // Opened from the app bar's menu button, a hotkey, or an upward swipe on
+    // the bar. Centred rather than hung off a button, since it is no longer
+    // tied to one.
+    function toggleMenu() {
+        if (quickSettingsPopup.visible)
+            quickSettingsPopup.forceClose()
+        else
+            quickSettingsPopup.forceOpen(root.menuAnchor
+                ? root.menuAnchor : mainWindow.contentItem)
+    }
+
+    IpcHandler {
+        target: "menu"
+        function toggle() { mainWindow.toggleMenu() }
+        function open() { quickSettingsPopup.forceOpen(root.menuAnchor) }
+        function close() { quickSettingsPopup.forceClose() }
+    }
+
     // Owned here rather than reached for through the app bar
     AppBarAddDropdown {
         id: barMenu
@@ -151,6 +256,7 @@ PanelWindow {
             if (root.barMenu) root.barMenu.historyRequested()
         }
         onOverviewRequested: root.overview.open()
+        onPowerRequested: powerPopupWin.open()
         onWallpaperRequested: root.nextWallpaper()
 
         onGamingRequested: {
@@ -269,6 +375,34 @@ PanelWindow {
         // beneath the blocks and never saw the press. A handler here still sees
         // events the blocks do not take, and unlike a MouseArea it carries no
         // cursor shape, so nothing below is shadowed.
+        // ## Swipe
+        // Dragging up from the bar opens the menu. A handler rather than a
+        // MouseArea, for the same reason the right click one is.
+        DragHandler {
+            id: barSwipe
+            target: null
+            enabled: !mainWindow.gamingMode
+            yAxis.enabled: true
+            xAxis.enabled: false
+
+            property real origin: 0
+
+            onActiveChanged: {
+                if (active) {
+                    barSwipe.origin = centroid.position.y
+                    return
+                }
+
+                // Dragged away from whichever edge the bar sits on
+                var travel = mainWindow.atBottom
+                    ? barSwipe.origin - centroid.position.y
+                    : centroid.position.y - barSwipe.origin
+
+                if (travel > 18)
+                    mainWindow.toggleMenu()
+            }
+        }
+
         TapHandler {
             id: barTap
             acceptedButtons: Qt.RightButton
@@ -353,9 +487,41 @@ PanelWindow {
             anchors.bottom: mainWindow.atBottom ? parent.bottom : undefined
             spacing: mainWindow.spacing
 
+            // Before the app bar
+            RoundedBlock {
+                id: centerLeading
+                height: mainWindow.blockHeight
+                sidePadding: mainWindow.blockPadding
+                visible: mainWindow.centerBefore.length > 0
+                color: mainWindow.fullWidth ? "transparent" : Theme.surface
+                border: !mainWindow.fullWidth
+                highlight: !mainWindow.fullWidth
+
+                angular: true
+                flushTop: !mainWindow.atBottom
+                flushBottom: mainWindow.atBottom
+
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: mainWindow.widgetSpacing
+
+                    Repeater {
+                        model: mainWindow.centerBefore
+                        delegate: BarWidget {
+                            required property var modelData
+                            widgetId: modelData
+                        }
+                    }
+                }
+            }
+
             AppBarWidget{
                 id: appbar
                 height: mainWindow.blockHeight
+
+                // Inherited RoundedBlock's default 15 rather than the bar's
+                // setting, so it never lined up with the blocks beside it
+                sidePadding: mainWindow.blockPadding
                 visible: mainWindow.centerWidgets.indexOf("appbar") !== -1
                 color: mainWindow.fullWidth ? "transparent" : Theme.surface
                 border: !mainWindow.fullWidth
@@ -364,6 +530,34 @@ PanelWindow {
                 angular: true
                 flushTop: !mainWindow.atBottom
                 flushBottom: mainWindow.atBottom
+            }
+
+            // After the app bar
+            RoundedBlock {
+                id: centerModules
+                height: mainWindow.blockHeight
+                sidePadding: mainWindow.blockPadding
+                visible: mainWindow.centerAfter.length > 0
+                color: mainWindow.fullWidth ? "transparent" : Theme.surface
+                border: !mainWindow.fullWidth
+                highlight: !mainWindow.fullWidth
+
+                angular: true
+                flushTop: !mainWindow.atBottom
+                flushBottom: mainWindow.atBottom
+
+                RowLayout {
+                    anchors.centerIn: parent
+                    spacing: mainWindow.widgetSpacing
+
+                    Repeater {
+                        model: mainWindow.centerAfter
+                        delegate: BarWidget {
+                            required property var modelData
+                            widgetId: modelData
+                        }
+                    }
+                }
             }
         }
 
@@ -401,34 +595,6 @@ PanelWindow {
                         }
                     }
 
-                    IconButton{
-                        id: settingsIconButton
-                        iconName: "settings"
-                        iconSize: 22
-                        Component.onCompleted: mainWindow.settingsAnchor = settingsIconButton
-                        color: root.theme.primary
-                        tooltipText: "Open Settings"
-                        onClicked: {
-                            quickSettingsPopup.toggle(settingsIconButton)
-                        }
-
-                        // The dense panel is still reachable from All Settings
-                        // until the granular settings window replaces it
-                        QuickSettingsPopup {
-                            id: quickSettingsPopup
-                            onOpenFullSettings: settingsWindow.open()
-                            onOpenPower: powerPopupWin.open()
-                        }
-
-                        PowerPopup {
-                            id: powerPopupWin
-                        }
-
-                        SettingsWindow {
-                            id: settingsWindow
-                        }
-                        
-                    }
                 }
             }
         }

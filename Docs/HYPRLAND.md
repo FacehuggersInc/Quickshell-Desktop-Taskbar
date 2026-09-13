@@ -439,3 +439,50 @@ point at.
 
 Not exposed. Hyprland's colour management options have moved between versions
 and the 0.56 syntax has not been checked against your compositor.
+
+---
+
+# Menu
+
+The settings gear is gone. A menu button leads the app bar, where the gaming
+re-enter button sits, and opens the quick panel — centred on the bar rather than
+hung under whatever opened it, since it is no longer tied to a single button.
+
+Three ways in:
+
+```lua
+hl.bind(mainMod .. " + Space", hl.dsp.exec_cmd("qs ipc call menu toggle"))
+```
+
+the button itself, or an upward drag on the bar (downward, if the bar is at the
+bottom). The swipe is a `DragHandler` and the right click a `TapHandler`, both on
+the bar container — a `MouseArea` there carries a cursor shape and shadows every
+widget beneath it.
+
+`qs ipc call menu open` and `close` are also available.
+
+---
+
+# Terminal handoff
+
+Package updates and the Run popup's Terminal button hand the command to a
+terminal rather than running it from the shell, so a privileged command is
+visible and confirmed.
+
+Ghostty needs care here. Its `-e` closes the surface as soon as the command
+exits **and** does not give the child an interactive stdin — a `read` in the
+command gets EOF immediately, so no epilogue written into the command can hold
+the window open. The symptom is a terminal that vanishes the instant you answer
+a prompt. `ghostty --wait-after-command=true` is the only thing that holds it,
+and the shell adds that flag when it sees ghostty without it.
+
+Reproduce the bare behaviour with:
+
+```bash
+ghostty -e bash -c 'echo hi; read -r -p "wait: " x; echo "got $x"'
+```
+
+The log line `pty fd closed, read thread exiting` is the giveaway.
+
+Other terminals keep the epilogue, which reads `/dev/tty` directly rather than
+stdin and falls back to a 30 second hold if that is unavailable.

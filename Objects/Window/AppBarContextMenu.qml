@@ -32,6 +32,24 @@ PopupPanel {
     property string subMenuTitle: ""
     property bool   subMenuOpen: false
 
+    // The tray hands over whatever the application gave it — usually a
+    // Quickshell image provider url, sometimes a path or a themed name. Shell
+    // entries use interface icon names and must never be looked up in the icon
+    // theme, which is how "send to workspace" ended up as a house.
+    property bool trayMode: false
+
+    function resolveIcon(name) {
+        if (!name || name === "")
+            return ""
+
+        var text = String(name)
+        if (text.indexOf("://") !== -1)
+            return text
+        if (text.charAt(0) === "/")
+            return "file://" + text
+        return Quickshell.iconPath(text, true)
+    }
+
     function openSubMenu(title) {
         subMenuItems = subMenuData[title] || []
         subMenuTitle = title
@@ -137,11 +155,22 @@ PopupPanel {
                         contentItem: RowLayout {
                             spacing: 6
                             Image {
-                                source: modelData.icon
-                                    ? root.iconSource(modelData.icon) : ""
-                                width: 16; height: 16
+                                source: popup.trayMode
+                                    ? popup.resolveIcon(modelData.icon) : ""
+                                Layout.preferredWidth: 16
+                                Layout.preferredHeight: 16
+                                sourceSize.width: 32
+                                sourceSize.height: 32
                                 fillMode: Image.PreserveAspectFit
-                                visible: source != ""
+                                smooth: true
+                                visible: popup.trayMode && source != ""
+                            }
+
+                            Icon {
+                                iconName: modelData.icon ? modelData.icon : ""
+                                iconSize: 15
+                                color: Theme.textDim
+                                visible: !popup.trayMode && modelData.icon
                             }
                             Text {
                                 text: actionBtn.text
@@ -264,11 +293,22 @@ PopupPanel {
                     contentItem: RowLayout {
                         spacing: 6
                         Image {
-                            source: modelData.icon
-                                ? root.iconSource(modelData.icon) : ""
-                            width: 16; height: 16
+                            source: popup.trayMode
+                                ? popup.resolveIcon(modelData.icon) : ""
+                            Layout.preferredWidth: 16
+                            Layout.preferredHeight: 16
+                            sourceSize.width: 32
+                            sourceSize.height: 32
                             fillMode: Image.PreserveAspectFit
-                            visible: source != ""
+                            smooth: true
+                            visible: popup.trayMode && source != ""
+                        }
+
+                        Icon {
+                            iconName: modelData.icon ? modelData.icon : ""
+                            iconSize: 15
+                            color: Theme.textDim
+                            visible: !popup.trayMode && modelData.icon
                         }
                         Text {
                             text: modelData.name || ""

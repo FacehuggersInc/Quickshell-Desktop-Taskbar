@@ -47,7 +47,9 @@ RoundedBlock {
                 type: entry.isSeparator ? "divider"
                     : (entry.hasChildren ? "submenu" : "action"),
                 name: entry.text ? entry.text : "",
-                icon: "",
+                // The entry carries its own icon; dropping it was why tray
+                // menus lost the icons they used to have
+                icon: entry.icon ? entry.icon : "",
                 entry: entry
             })
         }
@@ -64,6 +66,9 @@ RoundedBlock {
 
     AppBarContextMenu {
         id: trayMenu
+
+        // Only the tray looks outside the interface icon set
+        trayMode: true
 
         onActionTriggered: (action) => {
             if (action && action.entry)

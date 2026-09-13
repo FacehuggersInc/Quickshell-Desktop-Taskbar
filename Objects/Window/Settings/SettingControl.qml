@@ -11,7 +11,9 @@ SettingRow {
     required property var item
 
     // Steppers can present a scaled unit — minutes over a value stored in ms
-    readonly property real scale: item.scale ? item.scale : 1
+    // The schema field is still named scale; only this property was renamed,
+    // because scale is an Item property and cannot be shadowed
+    readonly property real scaleFactor: item.scale ? item.scale : 1
 
     label: item.label
     description: item.description || ""
@@ -141,8 +143,8 @@ SettingRow {
             to: entry.item.to
             step: entry.item.step || 1
             suffix: entry.item.suffix || ""
-            value: Math.round(entry.value(entry.item.from) / entry.scale)
-            onChanged: (v) => entry.commit(Math.round(v * entry.scale))
+            value: Math.round(entry.value(entry.item.from) / entry.scaleFactor)
+            onChanged: (v) => entry.commit(Math.round(v * entry.scaleFactor))
         }
     }
 

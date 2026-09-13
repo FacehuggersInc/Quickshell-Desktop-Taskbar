@@ -122,6 +122,16 @@ ShellRoot {
     // is re-applied once the event socket has reported what is connected
     Binding { target: DisplaySystem; property: "settings"; value: root.settings }
 
+    Binding {
+        target: ClockSystem
+        property: "use24"
+        value: {
+            var bump = root.settingsRevision
+            var widgets = root.settings.widgets || ({})
+            return widgets.clock24 === true
+        }
+    }
+
     Connections {
         target: DisplaySystem
         function onSaveRequested() { root.saveSettings() }
@@ -228,6 +238,27 @@ ShellRoot {
                 }
                 HotkeySystem.binds = out
                 HotkeySystem.scanned = true
+            }
+        }
+    }
+
+    Process {
+        id: luaConstsProc
+        command: root.newUtill(["--luaconsts"])
+        running: true
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var out = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 2) continue
+                        out.push({ name: parts[0], value: parts[1] })
+                    }
+                }
+                HotkeySystem.consts = out
             }
         }
     }
@@ -639,32 +670,61 @@ ShellRoot {
         }
     }
 
-    Process { id: terminalProc }
-
     // Handed to a terminal so the command is visible and confirmed. The shell
     // never runs a privileged package command itself.
     function runInTerminal(command, title) {
-        var wrapped = command + "; echo; echo '--- done, press enter ---'; read"
+        // ## Holding the window open
+        // Ghostty's -e closes the surface the moment the command exits, and
+        // does not hand the child an interactive stdin — a read in the command
+        // gets EOF immediately, so no epilogue written here can hold it. Its
+        // own --wait-after-command flag is the only thing that does, so it is
+        // added when missing. Other terminals are left alone and rely on the
+        // read below.
+        var wrapped = "{ " + command + " ; }; status=$?"
+            + "; exec 0</dev/tty 2>/dev/null || true"
+            + "; read -r -t 0.2 -n 10000 _discard 2>/dev/null || true"
+            + "; printf '\\n--- finished with status %s ---\\npress enter to close ' \"$status\""
+            + "; read -r _close </dev/tty 2>/dev/null || sleep 30"
+
+        // ## Building the invocation
+        // cmd() wraps anything containing shell syntax in bash -c, which turned
+        // "ghostty -e bash -c" into argv[2] and left our payload as $0 — the
+        // window never even opened. The line is assembled as one shell string
+        // instead, then run through bash once.
+
         var commands = root.settings.commands || ({})
         var custom = commands.terminal_run || ""
+        var line = ""
 
         if (custom) {
-            // terminal_run is written to be concatenated — "ghostty -e bash -c"
-            // with the command appended as one argument. Only substitute when
-            // the entry actually carries a placeholder.
-            if (custom.indexOf("{command}") !== -1)
-                terminalProc.command = root.cmd("terminal_run", { "command": wrapped })
-            else
-                terminalProc.command = root.cmd("terminal_run").concat([wrapped])
+            line = custom.indexOf("{command}") !== -1
+                ? custom.replace("{command}", root.shellQuote(wrapped))
+                : custom + " " + root.shellQuote(wrapped)
         } else if (commands.terminal) {
-            terminalProc.command =
-                root.cmd("terminal").concat(["-e", "bash", "-c", wrapped])
+            line = commands.terminal + " -e bash -c " + root.shellQuote(wrapped)
         } else {
             root.notify("Packages", "No terminal command configured.", "terminal")
             return
         }
 
-        terminalProc.running = true
+        root.execute(["bash", "-c", root.holdTerminal(line)])
+    }
+
+    // Single quoted, with embedded quotes escaped the only way bash allows
+    function shellQuote(text) {
+        return "'" + String(text).replace(/'/g, "'\\''") + "'"
+    }
+
+    // Ghostty needs its own flag to survive the command finishing. Operates on
+    // the command line rather than argv, since the terminal may be buried
+    // inside a shell string by then.
+    function holdTerminal(line) {
+        var text = String(line)
+        if (text.indexOf("ghostty") === -1)
+            return text
+        if (text.indexOf("--wait-after-command") !== -1)
+            return text
+        return text.replace("ghostty", "ghostty --wait-after-command=true")
     }
 
     Connections {
@@ -683,6 +743,432 @@ ShellRoot {
         function onTerminalRequested(command, title) {
             root.runInTerminal(command, title)
         }
+    }
+
+    // ## Calendar
+
+    Process {
+        id: calReadProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var out = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 5) continue
+                        out.push({
+                            id: parts[0],
+                            date: parts[1],
+                            time: parts[2],
+                            endTime: parts[3],
+                            title: parts[4],
+                            notes: parts.length > 5 ? parts[5] : "",
+                            location: parts.length > 6 ? parts[6] : "",
+                            source: parts.length > 7 ? parts[7] : "",
+                            remind: parts.length > 8 ? parts[8] : "",
+                            repeating: parts.length > 9 && parts[9] === "1"
+                        })
+                    }
+                }
+                CalendarSystem.events = out
+                CalendarSystem.loaded = true
+            }
+        }
+    }
+
+    Process {
+        id: calSubsProc
+        command: root.newUtill(["--calsubs"])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var out = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 3) continue
+                        out.push({
+                            key: parts[0],
+                            name: parts[1],
+                            url: parts[2],
+                            enabled: parts.length > 3 && parts[3] === "1",
+                            count: parts.length > 4 ? parseInt(parts[4]) : 0,
+                            colour: parts.length > 5 ? parts[5] : ""
+                        })
+                    }
+                }
+                CalendarSystem.subscriptions = out
+            }
+        }
+    }
+
+    Process {
+        id: calWriteProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var reply = this.text.trim()
+                if (reply.indexOf("error:") === 0)
+                    CalendarSystem.lastError = reply.substring(6)
+                else
+                    CalendarSystem.lastError = ""
+                CalendarSystem.refresh()
+                calSubsProc.running = true
+            }
+        }
+    }
+
+    Process {
+        id: calSyncProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                CalendarSystem.syncing = false
+
+                // Each row is key, count, error — a feed that failed keeps
+                // whatever it had rather than being emptied
+                var failures = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length > 2 && parts[2] !== "")
+                            failures.push(parts[0] + ": " + parts[2])
+                    }
+                }
+                CalendarSystem.lastError = failures.join("   ")
+
+                CalendarSystem.refresh()
+                calSubsProc.running = true
+            }
+        }
+    }
+
+    function runCalWrite(args) {
+        if (calWriteProc.running)
+            return
+        calWriteProc.command = root.newUtill(args)
+        calWriteProc.running = true
+    }
+
+    Connections {
+        target: CalendarSystem
+
+        function onReadRequested(from, to) {
+            if (calReadProc.running) return
+            calReadProc.command = root.newUtill(["--calevents", from, to])
+            calReadProc.running = true
+        }
+
+        function onAddRequested(fields) {
+            root.runCalWrite(["--caladd", fields.title, fields.date,
+                fields.time || "", fields.endTime || "", fields.notes || "",
+                fields.remind || "", fields.repeat || "none"])
+        }
+
+        function onEditRequested(id, fields) {
+            root.runCalWrite(["--caledit", id, fields.title, fields.date,
+                fields.time || "", fields.endTime || "", fields.notes || "",
+                fields.remind || "", fields.repeat || "none"])
+        }
+
+        function onDeleteRequested(id) {
+            root.runCalWrite(["--caldelete", id])
+        }
+
+        function onSubsRequested() {
+            if (!calSubsProc.running) calSubsProc.running = true
+        }
+
+        function onSubAddRequested(url, name) {
+            root.runCalWrite(["--calsubadd", url, name])
+        }
+
+        function onSubColourRequested(key, colour) {
+            root.runCalWrite(["--calsubcolour", key, colour])
+        }
+
+        function onSubRemoveRequested(key) {
+            root.runCalWrite(["--calsubremove", key])
+        }
+
+        function onSyncRequested(key) {
+            if (calSyncProc.running) return
+            CalendarSystem.syncing = true
+            calSyncProc.command = key && key !== ""
+                ? root.newUtill(["--calsync", key])
+                : root.newUtill(["--calsync"])
+            calSyncProc.running = true
+        }
+
+        function onReminderDue(event) {
+            var when = event.time && event.time !== "" ? " at " + event.time : ""
+            root.notify("Calendar", event.title + when, "history")
+        }
+    }
+
+    Timer {
+        id: calendarStartup
+        interval: 2500
+        repeat: false
+        running: true
+        onTriggered: {
+            CalendarSystem.refresh()
+            CalendarSystem.subsRequested()
+        }
+    }
+
+    // Feeds are refreshed on a slow cadence; nothing here is urgent
+    Timer {
+        interval: 1800000
+        repeat: true
+        running: true
+        onTriggered: CalendarSystem.syncRequested("")
+    }
+
+    // ## Clock, alarms, timers and tracking
+
+    Process {
+        id: alarmsProc
+        command: root.newUtill(["--alarms"])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var out = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 3) continue
+                        var days = []
+                        if (parts[3] && parts[3] !== "") {
+                            var pieces = parts[3].split(",")
+                            for (var j = 0; j < pieces.length; j++)
+                                days.push(parseInt(pieces[j]))
+                        }
+                        out.push({
+                            id: parts[0], label: parts[1], time: parts[2],
+                            days: days,
+                            enabled: parts[4] === "1",
+                            popup: parts[5] === "1"
+                        })
+                    }
+                }
+                ClockSystem.alarms = out
+            }
+        }
+    }
+
+    Process {
+        id: timersProc
+        command: root.newUtill(["--timers"])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var out = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 3) continue
+                        out.push({
+                            id: parts[0], label: parts[1],
+                            seconds: parseInt(parts[2]),
+                            popup: parts[3] === "1"
+                        })
+                    }
+                }
+                ClockSystem.timers = out
+            }
+        }
+    }
+
+    Process {
+        id: trackingProc
+        command: root.newUtill(["--tracking"])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var out = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 3) continue
+                        out.push({
+                            appClass: parts[0],
+                            total: parseInt(parts[1]),
+                            sessions: parseInt(parts[2]),
+                            reminder: parts.length > 3 ? parts[3] : "",
+                            popup: parts.length > 4 && parts[4] === "1",
+                            lastSeen: parts.length > 5 ? parseInt(parts[5]) : 0
+                        })
+                    }
+                }
+                ClockSystem.tracking = out
+            }
+        }
+    }
+
+    Process {
+        id: remindersProc
+        command: root.newUtill(["--reminders"])
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var out = []
+                var text = this.text.trim()
+                if (text && text !== "none") {
+                    var rows = text.split("\u001e")
+                    for (var i = 0; i < rows.length; i++) {
+                        var parts = rows[i].split("\u001f")
+                        if (parts.length < 5) continue
+                        out.push({
+                            id: parts[0],
+                            label: parts[1],
+                            appClass: parts[2],
+                            match: parts[3],
+                            seconds: parseInt(parts[4]),
+                            popup: parts[5] === "1",
+                            auto: parts[6] === "1"
+                        })
+                    }
+                }
+                ClockSystem.reminders = out
+            }
+        }
+    }
+
+    Process {
+        id: clockWriteProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                alarmsProc.running = true
+                timersProc.running = true
+                remindersProc.running = true
+            }
+        }
+    }
+
+    // Ticks and session marks share one process, so several arriving together
+    // used to be dropped by the busy guard — which is why applications showed
+    // zero sessions while plainly open. They queue instead.
+    property var trackQueue: []
+
+    Process {
+        id: trackTickProc
+        stdout: StdioCollector {
+            onStreamFinished: root.drainTrackQueue()
+        }
+    }
+
+    function queueTrack(args) {
+        var next = root.trackQueue.slice()
+        next.push(args)
+        root.trackQueue = next
+        root.drainTrackQueue()
+    }
+
+    function drainTrackQueue() {
+        if (trackTickProc.running || root.trackQueue.length === 0)
+            return
+        var next = root.trackQueue.slice()
+        var args = next.shift()
+        root.trackQueue = next
+        trackTickProc.command = root.newUtill(args)
+        trackTickProc.running = true
+    }
+
+    function runClockWrite(args) {
+        if (clockWriteProc.running)
+            return
+        clockWriteProc.command = root.newUtill(args)
+        clockWriteProc.running = true
+    }
+
+    Connections {
+        target: ClockSystem
+
+        function onReadRequested() {
+            if (!alarmsProc.running) alarmsProc.running = true
+            if (!timersProc.running) timersProc.running = true
+            if (!trackingProc.running) trackingProc.running = true
+            if (!remindersProc.running) remindersProc.running = true
+        }
+
+        function onReminderAddRequested(label, appClass, match, seconds, popup, auto) {
+            root.runClockWrite(["--reminderadd", label, appClass, match,
+                seconds, popup, auto])
+        }
+
+        function onReminderSetRequested(id, field, value) {
+            root.runClockWrite(["--reminderset", id, field, value])
+        }
+
+        function onReminderDeleteRequested(id) {
+            root.runClockWrite(["--reminderdelete", id])
+        }
+
+        function onAlarmAddRequested(label, time, days, popup) {
+            root.runClockWrite(["--alarmadd", label, time, days, popup])
+        }
+
+        function onAlarmSetRequested(id, field, value) {
+            root.runClockWrite(["--alarmset", id, field, value])
+        }
+
+        function onAlarmDeleteRequested(id) {
+            root.runClockWrite(["--alarmdelete", id])
+        }
+
+        function onTimerAddRequested(label, seconds, popup) {
+            root.runClockWrite(["--timeradd", label, seconds, popup])
+        }
+
+        function onTimerStartRequested(label, seconds, popup) {
+            // Adding a timer starts it. Saving one that then sat there doing
+            // nothing was the reason a timer "never went off".
+            ClockSystem.startTimer("pending-" + Date.now(), label,
+                parseInt(seconds), popup === "1")
+        }
+
+        function onTimerDeleteRequested(id) {
+            root.runClockWrite(["--timerdelete", id])
+        }
+
+        function onTrackTick(step, classes) {
+            root.queueTrack(["--tracktick", step].concat(classes))
+        }
+
+        function onTrackSession(appClass) {
+            root.queueTrack(["--tracksession", appClass])
+        }
+
+        function onTrackSetRequested(appClass, minutes, popup) {
+            root.runClockWrite(["--trackset", appClass, minutes, popup])
+        }
+
+        function onTrackResetRequested(appClass) {
+            root.runClockWrite(["--trackreset", appClass])
+        }
+    }
+
+    // Tracking totals are re-read on a slow cadence; nothing needs them sooner
+    Timer {
+        interval: 60000
+        repeat: true
+        running: true
+        onTriggered: {
+            if (!trackingProc.running) trackingProc.running = true
+        }
+    }
+
+    Timer {
+        interval: 3000
+        repeat: false
+        running: true
+        onTriggered: ClockSystem.refresh()
     }
 
     Timer {
@@ -1143,8 +1629,9 @@ ShellRoot {
     }
 
     function setWallpaperInterval(ms) {
+        // Only writes config — assigning the timer here would break the binding
+        // below, which is how the setting stopped taking effect at all
         root.settings.wallpapers.interval = ms
-        wallpaperSwitchTimer.interval = ms
         root.saveSettings()
     }
 
@@ -1157,10 +1644,8 @@ ShellRoot {
         // Do nothing if wallpaper cycling is disabled
         if (!settings.wallpapers.cycling) return
 
-        if (!initialDarkHourCheck) {
-            wallpaperSwitchTimer.interval = settings.wallpapers.interval
-            initialDarkHourCheck = true 
-        }
+        if (!initialDarkHourCheck)
+            initialDarkHourCheck = true
 
         // wallpaperMode overrides the hour check
         if (root.wallpaperMode === 1) {
@@ -1425,9 +1910,22 @@ ShellRoot {
     }
     Timer{
         id: wallpaperSwitchTimer
-        interval: 100 //Gets Altered in checkDarkHour
+
+        // Bound, so changing the interval in settings takes effect immediately.
+        // It used to be assigned once at startup and never re-read.
+        interval: {
+            var bump = root.settingsRevision
+            var configured = root.settings.wallpapers
+                ? root.settings.wallpapers.interval : 0
+            return (configured && configured > 0) ? configured : 900000
+        }
+
         running: root.settings.wallpapers.cycling !== false  // default true if key absent
         repeat: true
+
+        // Replaces the old 100ms first tick that got the wallpaper set at launch
+        triggeredOnStart: true
+
         onTriggered: checkDarkHour()
     }
     Process{
@@ -1542,6 +2040,14 @@ ShellRoot {
     property var bluetoothWidget: null
     property var volumeWidget: null
     property var barMenu: null
+    property var menuAnchor: null
+    property var notificationsPanel: null
+    property var calendarWindow: null
+    property var clockWindow: null
+    property var clockAnchor: null
+
+    // Stamped when anything fires, so the clock widget can react
+    property double alertPulse: 0
 
     // Widgets that own a right click menu. The bar wide handler sits on top, so
     // it has to decline presses that land on these.

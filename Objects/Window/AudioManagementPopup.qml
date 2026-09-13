@@ -308,19 +308,23 @@ PopupWindow {
 
         // ── Scrollable content ────────────────────────────────────
         ScrollView {
+            id: audioScroll
             anchors.fill: parent
             anchors.margins: 12
             // Pushed clear of the back control rather than sitting under it
             anchors.topMargin: volumeSettingsPopup.backTarget !== null ? 38 : 12
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
             ScrollBar.vertical.policy: ScrollBar.AsNeeded
-            contentWidth: panelWidth - 24
+            // availableWidth accounts for the scrollbar. The old fixed value
+            // was the full panel width, so content ran under the bar and past
+            // the edge whenever the list was long enough to scroll.
+            contentWidth: availableWidth
             contentHeight: audioColumn.implicitHeight
             clip: true
 
             ColumnLayout {
                 id: audioColumn
-                width: panelWidth - 24
+                width: audioScroll.availableWidth
                 spacing: Theme.gap
 
                 // ── MEDIA ─────────────────────────────────────────

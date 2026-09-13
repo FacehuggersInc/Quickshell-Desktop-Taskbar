@@ -1,6 +1,7 @@
 import os, sys, subprocess, time, random, re, json, glob, select, configparser, shutil, hashlib
 from pathlib import Path
 from datetime import datetime
+import datetime as dt
 from urllib.parse import urlparse
 from rapidfuzz import fuzz, process
 
@@ -650,6 +651,919 @@ class Utill():
 
         return "ok:" + str(backup)
 
+    ## ── CLOCK ────────────────────────────────────────────────────────────────
+    ## Alarms, timers and how long applications have been open. Tracking totals
+    ## are written incrementally rather than at exit, so a crash, an update or a
+    ## reboot costs at most one tick.
+
+    def clock_path(self):
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or (HOME / ".config"))
+        return base / "quickshell" / "clock.json"
+
+    def clock_load(self):
+        path = self.clock_path()
+        if not path.exists():
+            return {"alarms": [], "timers": [], "tracking": {}, "reminders": []}
+        try:
+            data = json.loads(path.read_text(errors="replace"))
+        except Exception:
+            return {"alarms": [], "timers": [], "tracking": {}, "reminders": []}
+
+        data.setdefault("alarms", [])
+        data.setdefault("timers", [])
+        data.setdefault("tracking", {})
+        data.setdefault("reminders", [])
+        return data
+
+    def clock_save(self, data):
+        path = self.clock_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        ## Written beside and moved into place, so a kill mid write cannot
+        ## leave a half a file behind
+        temp = path.with_suffix(".json.tmp")
+        temp.write_text(json.dumps(data, indent=2))
+        temp.replace(path)
+        return True
+
+    ## ── Alarms ───────────────────────────────────────────────────────────────
+
+    @argfunc
+    def alarms(self, *args):
+        data = self.clock_load()
+        rows = []
+        for alarm in data.get("alarms", []):
+            rows.append("\x1f".join([
+                str(alarm.get("id", "")),
+                str(alarm.get("label", "")),
+                str(alarm.get("time", "")),
+                ",".join(str(d) for d in alarm.get("days", [])),
+                "1" if alarm.get("enabled", True) else "0",
+                "1" if alarm.get("popup", False) else "0",
+            ]))
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def alarmadd(self, *args):
+        ## --alarmadd <label> <time> [days] [popup]
+        if len(args) < 2:
+            return "error:label and time required"
+
+        data = self.clock_load()
+        days = []
+        if len(args) > 2 and args[2]:
+            for piece in args[2].split(","):
+                if piece.strip().isdigit():
+                    days.append(int(piece.strip()))
+
+        entry = {
+            "id": "alarm-%d" % int(time.time() * 1000),
+            "label": args[0],
+            "time": args[1],
+            "days": days,
+            "enabled": True,
+            "popup": len(args) > 3 and args[3] == "1",
+        }
+        data["alarms"].append(entry)
+        self.clock_save(data)
+        return "ok:" + entry["id"]
+
+    @argfunc
+    def alarmset(self, *args):
+        ## --alarmset <id> <field> <value>
+        if len(args) < 3:
+            return "error:id, field and value required"
+
+        data = self.clock_load()
+        for alarm in data.get("alarms", []):
+            if str(alarm.get("id")) != args[0]:
+                continue
+            if args[1] in ("enabled", "popup"):
+                alarm[args[1]] = args[2] == "1"
+            elif args[1] == "days":
+                alarm["days"] = [int(p) for p in args[2].split(",") if p.strip().isdigit()]
+            else:
+                alarm[args[1]] = args[2]
+            self.clock_save(data)
+            return "ok"
+        return "error:not found"
+
+    @argfunc
+    def alarmdelete(self, *args):
+        if not args:
+            return "error:no id"
+        data = self.clock_load()
+        data["alarms"] = [a for a in data["alarms"] if str(a.get("id")) != args[0]]
+        self.clock_save(data)
+        return "ok"
+
+    ## ── Timers ───────────────────────────────────────────────────────────────
+
+    @argfunc
+    def timers(self, *args):
+        data = self.clock_load()
+        rows = []
+        for timer in data.get("timers", []):
+            rows.append("\x1f".join([
+                str(timer.get("id", "")),
+                str(timer.get("label", "")),
+                str(timer.get("seconds", 0)),
+                "1" if timer.get("popup", False) else "0",
+            ]))
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def timeradd(self, *args):
+        ## --timeradd <label> <seconds> [popup]
+        if len(args) < 2:
+            return "error:label and seconds required"
+
+        data = self.clock_load()
+        entry = {
+            "id": "timer-%d" % int(time.time() * 1000),
+            "label": args[0],
+            "seconds": int(args[1]) if str(args[1]).isdigit() else 60,
+            "popup": len(args) > 2 and args[2] == "1",
+        }
+        data["timers"].append(entry)
+        self.clock_save(data)
+        return "ok:" + entry["id"]
+
+    @argfunc
+    def timerdelete(self, *args):
+        if not args:
+            return "error:no id"
+        data = self.clock_load()
+        data["timers"] = [t for t in data["timers"] if str(t.get("id")) != args[0]]
+        self.clock_save(data)
+        return "ok"
+
+    ## ── Reminders ────────────────────────────────────────────────────────────
+    ## Tied to an application, optionally narrowed to windows whose title
+    ## contains a fragment — so "the browser" and "that one document" are both
+    ## expressible without inventing a rule language.
+
+    @argfunc
+    def reminders(self, *args):
+        data = self.clock_load()
+        rows = []
+        for entry in data.get("reminders", []):
+            rows.append("\x1f".join([
+                str(entry.get("id", "")),
+                str(entry.get("label", "")),
+                str(entry.get("appClass", "")),
+                str(entry.get("match", "")),
+                str(entry.get("seconds", 0)),
+                "1" if entry.get("popup", False) else "0",
+                "1" if entry.get("auto", True) else "0",
+            ]))
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def reminderadd(self, *args):
+        ## --reminderadd <label> <appClass> <match> <seconds> [popup] [auto]
+        if len(args) < 4:
+            return "error:label, class and duration required"
+
+        data = self.clock_load()
+        entry = {
+            "id": "remind-%d" % int(time.time() * 1000),
+            "label": args[0],
+            "appClass": args[1],
+            "match": args[2],
+            "seconds": int(args[3]) if str(args[3]).isdigit() else 3600,
+            "popup": len(args) > 4 and args[4] == "1",
+            "auto": len(args) < 6 or args[5] == "1",
+        }
+        data["reminders"].append(entry)
+        self.clock_save(data)
+        return "ok:" + entry["id"]
+
+    @argfunc
+    def reminderset(self, *args):
+        ## --reminderset <id> <field> <value>
+        if len(args) < 3:
+            return "error:id, field and value required"
+
+        data = self.clock_load()
+        for entry in data.get("reminders", []):
+            if str(entry.get("id")) != args[0]:
+                continue
+            if args[1] in ("popup", "auto"):
+                entry[args[1]] = args[2] == "1"
+            elif args[1] == "seconds":
+                entry["seconds"] = int(args[2]) if str(args[2]).isdigit() else 3600
+            else:
+                entry[args[1]] = args[2]
+            self.clock_save(data)
+            return "ok"
+        return "error:not found"
+
+    @argfunc
+    def reminderdelete(self, *args):
+        if not args:
+            return "error:no id"
+        data = self.clock_load()
+        data["reminders"] = [r for r in data["reminders"]
+                             if str(r.get("id")) != args[0]]
+        self.clock_save(data)
+        return "ok"
+
+    ## ── Application tracking ─────────────────────────────────────────────────
+    ## Lifetime totals per window class. The shell itself is never counted.
+
+    TRACK_IGNORE = {"quickshell", "qs"}
+
+    @argfunc
+    def tracking(self, *args):
+        data = self.clock_load()
+        rows = []
+        for name, entry in sorted(data.get("tracking", {}).items(),
+                                  key=lambda kv: -kv[1].get("total", 0)):
+            rows.append("\x1f".join([
+                name,
+                str(int(entry.get("total", 0))),
+                str(int(entry.get("sessions", 0))),
+                str(entry.get("reminder", "")),
+                "1" if entry.get("popup", False) else "0",
+                str(int(entry.get("lastSeen", 0))),
+            ]))
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def tracktick(self, *args):
+        ## --tracktick <seconds> <class> [class...]
+        if len(args) < 2:
+            return "ok"
+
+        try:
+            step = int(args[0])
+        except Exception:
+            return "error:bad step"
+
+        data = self.clock_load()
+        stamp = int(time.time())
+
+        for name in args[1:]:
+            key = str(name).strip()
+            if not key or key.lower() in Utill.TRACK_IGNORE:
+                continue
+
+            entry = data["tracking"].setdefault(
+                key, {"total": 0, "sessions": 0, "lastSeen": 0})
+            entry["total"] = int(entry.get("total", 0)) + step
+            entry["lastSeen"] = stamp
+
+        self.clock_save(data)
+        return "ok"
+
+    @argfunc
+    def tracksession(self, *args):
+        ## --tracksession <class> — a fresh launch, not a continuation
+        if not args:
+            return "error:no class"
+        key = str(args[0]).strip()
+        if not key or key.lower() in Utill.TRACK_IGNORE:
+            return "ok"
+
+        data = self.clock_load()
+        entry = data["tracking"].setdefault(
+            key, {"total": 0, "sessions": 0, "lastSeen": 0})
+        entry["sessions"] = int(entry.get("sessions", 0)) + 1
+        entry["lastSeen"] = int(time.time())
+        self.clock_save(data)
+        return "ok"
+
+    @argfunc
+    def trackset(self, *args):
+        ## --trackset <class> <reminderMinutes> <popup>
+        if len(args) < 2:
+            return "error:class and value required"
+
+        data = self.clock_load()
+        entry = data["tracking"].setdefault(
+            args[0], {"total": 0, "sessions": 0, "lastSeen": 0})
+        entry["reminder"] = args[1]
+        entry["popup"] = len(args) > 2 and args[2] == "1"
+        self.clock_save(data)
+        return "ok"
+
+    @argfunc
+    def trackreset(self, *args):
+        if not args:
+            return "error:no class"
+        data = self.clock_load()
+        data["tracking"].pop(args[0], None)
+        self.clock_save(data)
+        return "ok"
+
+    ## ── CALENDAR ─────────────────────────────────────────────────────────────
+    ## Local events and subscribed feeds are kept apart in the store. A failed
+    ## or emptied sync can only ever clear its own cache, never anything typed
+    ## by hand.
+
+    def cal_path(self):
+        base = Path(os.environ.get("XDG_CONFIG_HOME") or (HOME / ".config"))
+        return base / "quickshell" / "calendar.json"
+
+    def cal_load(self):
+        path = self.cal_path()
+        if not path.exists():
+            return {"events": [], "subscriptions": [], "synced": {}}
+        try:
+            data = json.loads(path.read_text(errors="replace"))
+        except Exception:
+            return {"events": [], "subscriptions": [], "synced": {}}
+
+        data.setdefault("events", [])
+        data.setdefault("subscriptions", [])
+        data.setdefault("synced", {})
+        return data
+
+    def cal_save(self, data):
+        path = self.cal_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        if path.exists():
+            backup = path.with_suffix(".json.bak")
+            try:
+                shutil.copy2(str(path), str(backup))
+            except Exception:
+                pass
+
+        path.write_text(json.dumps(data, indent=2))
+        return True
+
+    ## ── iCal parsing ─────────────────────────────────────────────────────────
+
+    def ical_unfold(self, text):
+        ## Continuation lines begin with a space or tab and belong to the line
+        ## before them
+        out = []
+        for raw in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+            if raw[:1] in (" ", "\t") and out:
+                out[-1] += raw[1:]
+            else:
+                out.append(raw)
+        return out
+
+    def ical_unescape(self, value):
+        return (value.replace("\\n", "\n").replace("\\N", "\n")
+                     .replace("\\,", ",").replace("\\;", ";")
+                     .replace("\\\\", "\\"))
+
+    def ical_split(self, line):
+        ## DTSTART;TZID=America/Chicago:20260804T143000
+        ##   -> ("DTSTART", {"TZID": "..."}, "20260804T143000")
+        head, _, value = line.partition(":")
+        parts = head.split(";")
+        name = parts[0].upper()
+
+        params = {}
+        for chunk in parts[1:]:
+            key, _, val = chunk.partition("=")
+            params[key.upper()] = val.strip('"')
+
+        return name, params, value
+
+    def ical_stamp(self, value, params):
+        ## Returns (date, time) as YYYY-MM-DD and HH:MM, time empty for all day
+        value = value.strip()
+        if not value:
+            return "", ""
+
+        if params.get("VALUE", "").upper() == "DATE" or len(value) == 8:
+            return "%s-%s-%s" % (value[0:4], value[4:6], value[6:8]), ""
+
+        if "T" not in value:
+            return "", ""
+
+        date_part, _, time_part = value.partition("T")
+        if len(date_part) != 8:
+            return "", ""
+
+        stamp = "%s-%s-%s" % (date_part[0:4], date_part[4:6], date_part[6:8])
+        clock = "%s:%s" % (time_part[0:2], time_part[2:4])
+
+        ## A trailing Z is UTC; shift into local time
+        if time_part.endswith("Z"):
+            try:
+                moment = dt.datetime(
+                    int(date_part[0:4]), int(date_part[4:6]), int(date_part[6:8]),
+                    int(time_part[0:2]), int(time_part[2:4]),
+                    tzinfo=dt.timezone.utc).astimezone()
+                stamp = moment.strftime("%Y-%m-%d")
+                clock = moment.strftime("%H:%M")
+            except Exception:
+                pass
+
+        return stamp, clock
+
+    def ical_rrule(self, value):
+        out = {}
+        for chunk in value.split(";"):
+            key, _, val = chunk.partition("=")
+            if key:
+                out[key.upper()] = val
+        return out
+
+    def ical_events(self, text):
+        events = []
+        current = None
+
+        for line in self.ical_unfold(text):
+            stripped = line.strip()
+            if stripped == "BEGIN:VEVENT":
+                current = {}
+                continue
+            if stripped == "END:VEVENT":
+                if current is not None:
+                    events.append(current)
+                current = None
+                continue
+            if current is None or ":" not in stripped:
+                continue
+
+            name, params, value = self.ical_split(stripped)
+            if name in ("EXDATE", "RDATE"):
+                current.setdefault(name, []).append((params, value))
+            else:
+                current[name] = (params, value)
+
+        return events
+
+    ## ── Recurrence ───────────────────────────────────────────────────────────
+    ## Enough of RRULE to cover what real calendars emit: FREQ with INTERVAL,
+    ## COUNT or UNTIL, and BYDAY for weekly rules. Anything stranger falls back
+    ## to the single starting occurrence rather than guessing.
+
+    WEEKDAYS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
+
+    def cal_expand(self, start_date, rule, window_start, window_end, exdates=None):
+        try:
+            first = dt.date.fromisoformat(start_date)
+        except Exception:
+            return []
+
+        if not rule:
+            return [start_date] if window_start <= start_date <= window_end else []
+
+        exdates = set(exdates or [])
+        freq = rule.get("FREQ", "").upper()
+        interval = max(1, int(rule.get("INTERVAL", "1") or 1))
+        count = int(rule["COUNT"]) if rule.get("COUNT", "").isdigit() else None
+
+        until = None
+        if rule.get("UNTIL"):
+            raw = rule["UNTIL"][:8]
+            try:
+                until = dt.date(int(raw[0:4]), int(raw[4:6]), int(raw[6:8]))
+            except Exception:
+                until = None
+
+        stop = dt.date.fromisoformat(window_end)
+        if until and until < stop:
+            stop = until
+
+        days = []
+        if freq == "WEEKLY" and rule.get("BYDAY"):
+            for token in rule["BYDAY"].split(","):
+                token = token.strip()[-2:].upper()
+                if token in Utill.WEEKDAYS:
+                    days.append(Utill.WEEKDAYS[token])
+
+        out = []
+        produced = 0
+        cursor = first
+        steps = 0
+        guard = 0
+
+        while cursor <= stop and guard < 2000:
+            guard += 1
+
+            if freq == "WEEKLY" and days:
+                ## Every matching weekday inside this interval's week
+                monday = cursor - dt.timedelta(days=cursor.weekday())
+                for offset in sorted(days):
+                    moment = monday + dt.timedelta(days=offset)
+                    if moment < first or moment > stop:
+                        continue
+                    stamp = moment.isoformat()
+                    if stamp in exdates:
+                        continue
+                    produced += 1
+                    if count is not None and produced > count:
+                        return out
+                    if stamp >= window_start:
+                        out.append(stamp)
+                cursor = cursor + dt.timedelta(weeks=interval)
+                continue
+
+            stamp = cursor.isoformat()
+            if stamp not in exdates:
+                produced += 1
+                if count is not None and produced > count:
+                    return out
+                if stamp >= window_start:
+                    out.append(stamp)
+
+            if freq == "DAILY":
+                cursor = cursor + dt.timedelta(days=interval)
+            elif freq == "WEEKLY":
+                cursor = cursor + dt.timedelta(weeks=interval)
+            elif freq in ("MONTHLY", "YEARLY"):
+                ## Measured from the original day, not from the last clamped
+                ## one — advancing from the clamp made the 31st drift to the
+                ## 28th permanently after a February
+                steps += 1
+                months = interval * steps * (12 if freq == "YEARLY" else 1)
+                month = first.month - 1 + months
+                year = first.year + month // 12
+                month = month % 12 + 1
+                day = min(first.day, self.cal_month_length(year, month))
+                cursor = dt.date(year, month, day)
+            else:
+                break
+
+        return out
+
+    def cal_month_length(self, year, month):
+        if month == 12:
+            nxt = dt.date(year + 1, 1, 1)
+        else:
+            nxt = dt.date(year, month + 1, 1)
+        return (nxt - dt.timedelta(days=1)).day
+
+    ## ── Subscriptions ────────────────────────────────────────────────────────
+
+    def cal_fetch_url(self, url):
+        text = str(url).strip()
+        if text.startswith("webcal://"):
+            text = "https://" + text[len("webcal://"):]
+
+        ## Google's cid link sits directly under the iCal address in its own
+        ## settings, so it is the likeliest wrong thing to paste — and it
+        ## fetches an HTML page perfectly, which would look like a clean sync of
+        ## nothing. The parameter is the calendar's address in base64, so the
+        ## conversion is exact rather than a guess.
+        import base64, urllib.parse
+        found = re.search(
+            r"calendar\.google\.com/calendar/[^?]*\?.*\bcid=([^&]+)", text, re.I)
+        if found:
+            raw = urllib.parse.unquote(found.group(1))
+            try:
+                address = base64.b64decode(
+                    raw + "=" * (-len(raw) % 4)).decode("utf-8")
+                if "@" in address:
+                    return ("https://calendar.google.com/calendar/ical/"
+                            + urllib.parse.quote(address, safe="")
+                            + "/public/basic.ics")
+            except Exception:
+                pass
+
+        return text
+
+    def cal_sync_one(self, sub):
+        url = self.cal_fetch_url(sub.get("url", ""))
+        if not url:
+            return None, "no url"
+
+        ## curl first, then urllib, so a machine without curl still syncs. The
+        ## real reason is reported rather than a bare "fetch failed", which said
+        ## nothing about whether it was the network, the url or a missing tool.
+        text = ""
+        reason = ""
+
+        try:
+            command = ["curl", "-fsSL", "--max-time", "45",
+                       "-H", "User-Agent: Mozilla/5.0"]
+            if sub.get("user"):
+                command += ["-u", "%s:%s" % (sub.get("user"), sub.get("password", ""))]
+            command.append(url)
+
+            result = subprocess.run(command, capture_output=True,
+                                    text=True, timeout=60)
+            if result.returncode == 0:
+                text = result.stdout
+            else:
+                reason = (result.stderr or "").strip().split("\n")[-1]
+                if not reason:
+                    reason = "curl exit %d" % result.returncode
+        except FileNotFoundError:
+            reason = "curl not installed"
+        except Exception as error:
+            reason = str(error)
+
+        if not text.strip():
+            try:
+                import urllib.request
+                request = urllib.request.Request(
+                    url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(request, timeout=45) as response:
+                    text = response.read().decode("utf-8", "replace")
+                reason = ""
+            except Exception as error:
+                if not reason:
+                    reason = str(error)
+
+        if not text.strip():
+            ## 401 and 403 mean the address itself is fine but it is not public
+            if "401" in reason:
+                reason = ("needs credentials — use the private or secret "
+                          "address, or add a username and password")
+            elif "403" in reason:
+                reason = "refused — the calendar is not shared publicly"
+            return None, reason or "empty response"
+
+        if "BEGIN:VCALENDAR" not in text and "BEGIN:VEVENT" not in text:
+            return None, "not an ical feed"
+
+        result = type("Result", (), {"stdout": text, "returncode": 0})()
+
+        raw = self.ical_events(result.stdout)
+
+        ## A recurring series and its edited instances arrive as separate
+        ## VEVENTs sharing a UID. The overrides are applied over the series
+        ## rather than listed alongside it.
+        overrides = {}
+        for event in raw:
+            if "RECURRENCE-ID" not in event:
+                continue
+            uid = event.get("UID", ({}, ""))[1]
+            params, value = event["RECURRENCE-ID"]
+            date, _ = self.ical_stamp(value, params)
+            overrides[(uid, date)] = event
+
+        out = []
+        for event in raw:
+            if "RECURRENCE-ID" in event:
+                continue
+
+            summary = self.ical_unescape(event.get("SUMMARY", ({}, ""))[1]).strip()
+            if not summary:
+                continue
+
+            params, value = event.get("DTSTART", ({}, ""))
+            date, clock = self.ical_stamp(value, params)
+            if not date:
+                continue
+
+            end_clock = ""
+            if "DTEND" in event:
+                end_params, end_value = event["DTEND"]
+                _, end_clock = self.ical_stamp(end_value, end_params)
+
+            rule = None
+            if "RRULE" in event:
+                rule = self.ical_rrule(event["RRULE"][1])
+
+            exdates = []
+            for ex_params, ex_value in event.get("EXDATE", []):
+                for piece in ex_value.split(","):
+                    ex_date, _ = self.ical_stamp(piece, ex_params)
+                    if ex_date:
+                        exdates.append(ex_date)
+
+            ## An edited instance replaces its original date. Without this the
+            ## series still produced that day and the moved copy was added
+            ## beside it, so the event appeared twice.
+            uid = event.get("UID", ({}, ""))[1]
+            for (other_uid, moved_from) in overrides:
+                if other_uid == uid and moved_from not in exdates:
+                    exdates.append(moved_from)
+
+            out.append({
+                "uid": uid,
+                "title": summary,
+                "date": date,
+                "time": clock,
+                "endTime": end_clock,
+                "notes": self.ical_unescape(
+                    event.get("DESCRIPTION", ({}, ""))[1]).strip()[:400],
+                "location": self.ical_unescape(
+                    event.get("LOCATION", ({}, ""))[1]).strip(),
+                "rrule": rule,
+                "exdates": exdates,
+                "source": sub.get("key", ""),
+            })
+
+        ## Overrides become plain one-off entries on their own date
+        for (uid, date), event in overrides.items():
+            params, value = event.get("DTSTART", ({}, ""))
+            moved, clock = self.ical_stamp(value, params)
+            if not moved:
+                continue
+            out.append({
+                "uid": uid + "@" + date,
+                "title": self.ical_unescape(event.get("SUMMARY", ({}, ""))[1]).strip(),
+                "date": moved,
+                "time": clock,
+                "endTime": "",
+                "notes": "",
+                "location": "",
+                "rrule": None,
+                "exdates": [],
+                "source": sub.get("key", ""),
+                "overrides": date,
+            })
+
+        return out, ""
+
+    @argfunc
+    def calsync(self, *args):
+        data = self.cal_load()
+        subs = data.get("subscriptions", [])
+        wanted = args[0] if args else ""
+
+        results = []
+        for sub in subs:
+            if wanted and sub.get("key") != wanted:
+                continue
+            if sub.get("enabled") is False:
+                continue
+
+            events, error = self.cal_sync_one(sub)
+            if events is None:
+                ## The cache is left alone — a failed fetch must not empty a
+                ## calendar that was working a moment ago
+                results.append("%s\x1f0\x1f%s" % (sub.get("key", ""), error))
+                continue
+
+            data["synced"][sub.get("key", "")] = events
+            results.append("%s\x1f%d\x1f" % (sub.get("key", ""), len(events)))
+
+        self.cal_save(data)
+        return "\x1e".join(results) if results else "none"
+
+    ## ── Store operations ─────────────────────────────────────────────────────
+
+    @argfunc
+    def calevents(self, *args):
+        ## --calevents <from> <to>
+        if len(args) < 2:
+            return "error:range required"
+
+        window_start, window_end = args[0], args[1]
+        data = self.cal_load()
+
+        pool = []
+        for event in data.get("events", []):
+            pool.append(event)
+        for key, events in data.get("synced", {}).items():
+            for event in events:
+                pool.append(event)
+
+        rows = []
+        for event in pool:
+            rule = event.get("rrule")
+            dates = self.cal_expand(event.get("date", ""), rule,
+                                    window_start, window_end,
+                                    event.get("exdates"))
+            for date in dates:
+                rows.append("\x1f".join([
+                    str(event.get("id", event.get("uid", ""))),
+                    date,
+                    str(event.get("time", "")),
+                    str(event.get("endTime", "")),
+                    str(event.get("title", "")).replace("\x1f", " "),
+                    str(event.get("notes", "")).replace("\x1f", " ")[:200],
+                    str(event.get("location", "")),
+                    str(event.get("source", "")),
+                    str(event.get("remind", "")),
+                    "1" if rule else "0",
+                ]))
+
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def caladd(self, *args):
+        ## --caladd <title> <date> [time] [endTime] [notes] [remind] [repeat]
+        if len(args) < 2:
+            return "error:title and date required"
+
+        data = self.cal_load()
+        rule = None
+        repeat = args[6] if len(args) > 6 else ""
+        if repeat and repeat != "none":
+            rule = {"FREQ": repeat.upper()}
+
+        entry = {
+            "id": "local-%d" % int(time.time() * 1000),
+            "title": args[0],
+            "date": args[1],
+            "time": args[2] if len(args) > 2 else "",
+            "endTime": args[3] if len(args) > 3 else "",
+            "notes": args[4] if len(args) > 4 else "",
+            "remind": args[5] if len(args) > 5 else "",
+            "rrule": rule,
+            "exdates": [],
+            "source": "",
+        }
+        data["events"].append(entry)
+        self.cal_save(data)
+        return "ok:" + entry["id"]
+
+    @argfunc
+    def caledit(self, *args):
+        ## --caledit <id> <title> <date> [time] [endTime] [notes] [remind] [repeat]
+        if len(args) < 3:
+            return "error:id, title and date required"
+
+        data = self.cal_load()
+        target = None
+        for event in data.get("events", []):
+            if str(event.get("id")) == args[0]:
+                target = event
+                break
+
+        if target is None:
+            return "error:not found"
+
+        repeat = args[7] if len(args) > 7 else ""
+        target["title"] = args[1]
+        target["date"] = args[2]
+        target["time"] = args[3] if len(args) > 3 else ""
+        target["endTime"] = args[4] if len(args) > 4 else ""
+        target["notes"] = args[5] if len(args) > 5 else ""
+        target["remind"] = args[6] if len(args) > 6 else ""
+        target["rrule"] = ({"FREQ": repeat.upper()}
+                           if repeat and repeat != "none" else None)
+
+        self.cal_save(data)
+        return "ok:" + str(target["id"])
+
+    @argfunc
+    def caldelete(self, *args):
+        if not args:
+            return "error:no id"
+        data = self.cal_load()
+        before = len(data["events"])
+        data["events"] = [e for e in data["events"] if str(e.get("id")) != args[0]]
+        self.cal_save(data)
+        return "ok" if len(data["events"]) != before else "error:not found"
+
+    @argfunc
+    def calsubs(self, *args):
+        data = self.cal_load()
+        rows = []
+        for sub in data.get("subscriptions", []):
+            key = sub.get("key", "")
+            rows.append("\x1f".join([
+                key,
+                sub.get("name", ""),
+                sub.get("url", ""),
+                "1" if sub.get("enabled", True) else "0",
+                str(len(data.get("synced", {}).get(key, []))),
+                sub.get("colour", ""),
+            ]))
+        return "\x1e".join(rows) if rows else "none"
+
+    @argfunc
+    def calsubadd(self, *args):
+        ## --calsubadd <url> [name] [user] [password]
+        if not args:
+            return "error:no url"
+
+        data = self.cal_load()
+        key = "sub-%d" % int(time.time() * 1000)
+        data["subscriptions"].append({
+            "key": key,
+            "url": args[0],
+            "name": args[1] if len(args) > 1 else args[0][:40],
+            "user": args[2] if len(args) > 2 else "",
+            "password": args[3] if len(args) > 3 else "",
+            "enabled": True,
+        })
+        self.cal_save(data)
+        return "ok:" + key
+
+    @argfunc
+    def calsubcolour(self, *args):
+        ## --calsubcolour <key> <#rrggbb>
+        if len(args) < 2:
+            return "error:key and colour required"
+
+        data = self.cal_load()
+        for sub in data.get("subscriptions", []):
+            if sub.get("key") == args[0]:
+                sub["colour"] = args[1]
+                self.cal_save(data)
+                return "ok"
+        return "error:not found"
+
+    @argfunc
+    def calsubremove(self, *args):
+        if not args:
+            return "error:no key"
+        data = self.cal_load()
+        data["subscriptions"] = [
+            sub for sub in data.get("subscriptions", [])
+            if sub.get("key") != args[0]
+        ]
+        data.get("synced", {}).pop(args[0], None)
+        self.cal_save(data)
+        return "ok"
+
     ## ── PACKAGES ─────────────────────────────────────────────────────────────
     ## Read only. Installing, updating and removing are handed to a terminal so
     ## the command is visible and confirmed rather than run silently as root.
@@ -1271,12 +2185,29 @@ class Utill():
 
     def lua_key_expr(self, display, consts):
         ## Rebuild using whatever constant the config already uses, so edits keep
-        ## the author's style instead of inlining SUPER everywhere
-        for name, value in consts.items():
-            if display == value:
+        ## the author's style instead of inlining SUPER everywhere.
+        ##
+        ## Either form is accepted in the one field: the resolved value
+        ## ("SUPER + Space") or the variable itself ("mainMod + Space"). Both
+        ## come back out as `mainMod .. " + Space"`.
+        text = str(display).strip()
+
+        ## Written as the variable
+        for name in consts:
+            if text == name:
                 return name
-            if display.startswith(value + " + "):
-                rest = display[len(value):]
+            if text.startswith(name + " ") or text.startswith(name + "+"):
+                rest = text[len(name):]
+                if not rest.strip():
+                    return name
+                return '%s .. "%s"' % (name, rest)
+
+        ## Written as the value the variable holds
+        for name, value in consts.items():
+            if text == value:
+                return name
+            if text.startswith(value + " + "):
+                rest = text[len(value):]
                 return '%s .. "%s"' % (name, rest)
         return '"%s"' % display.replace('"', '\\"')
 
@@ -1433,6 +2364,23 @@ class Utill():
         indent = re.match(r"\s*", current).group(0)
         lines[line - 1] = '%shl.exec_cmd("%s")' % (indent, command.replace('"', '\\"'))
         return self.lua_commit(path, "\n".join(lines))
+
+    @argfunc
+    def luaconsts(self, *args):
+        ## The local string variables a key expression may use
+        rows = []
+        seen = []
+        for path in self.lua_files():
+            try:
+                text = path.read_text(errors="replace")
+            except Exception:
+                continue
+            for name, value in self.lua_consts(text).items():
+                if name in seen:
+                    continue
+                seen.append(name)
+                rows.append("\x1f".join([name, value]))
+        return "\x1e".join(rows) if rows else "none"
 
     @argfunc
     def luabinds(self, *args):

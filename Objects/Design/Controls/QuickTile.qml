@@ -10,65 +10,64 @@ Rectangle {
     property string label: ""
     property string sublabel: ""
     property bool active: false
+
+    // A toggle keeps a state; an action just fires. They looked identical,
+    // so there was no way to tell which a tile was until you pressed it.
+    property bool toggle: false
     signal activated()
 
-    implicitHeight: 62
-    radius: Theme.radius
+    // Square, with the icon centred and the label beneath. The side matches a
+    // PanelRow's height so a grid of tiles lines up with the rows above it.
+    implicitHeight: 52
+    radius: Theme.radiusSmall
     opacity: enabled ? 1.0 : 0.45
 
-    color: active ? Theme.alpha(Theme.accent, 0.30)
-                  : Theme.alpha(Theme.textBase, 0.09)
+    // Filled when on, outlined when off — the same rule the rows follow
+    // A toggle that is on is filled outright. An action never fills — it
+    // carries the arrow instead — so the two are told apart by the surface.
+    color: active ? Theme.alpha(Theme.accent, 0.55)
+        : (tileArea.containsMouse ? Theme.alpha(Theme.accent, 0.12)
+                                  : Theme.alpha(Theme.scrimBase, 0.35))
     border.width: Theme.borderWidth
-    border.color: active ? Theme.accent : Theme.border
+    border.color: active ? Theme.accent : Theme.alpha(Theme.textBase, 0.10)
 
     Behavior on color { ColorAnimation { duration: Theme.durFast } }
     Behavior on border.color { ColorAnimation { duration: Theme.durFast } }
 
-    Icon {
-        id: tileIcon
-        visible: tile.iconName !== ""
-        iconName: tile.iconName !== "" ? tile.iconName : "settings"
-        iconSize: 20
-        color: tile.active ? Theme.accentText : Theme.textDim
-        anchors.left: parent.left
-        anchors.leftMargin: 12
-        anchors.verticalCenter: parent.verticalCenter
+    // Actions carry an arrow instead
+    Text {
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: 4
+        anchors.rightMargin: 8
+        visible: !tile.toggle
+        text: "\u2197"
+        color: tileArea.containsMouse ? Theme.accentText : Theme.alpha(Theme.textBase, 0.30)
+        font.family: Theme.fontFamily
+        font.pixelSize: 11
     }
 
     Column {
-        anchors.left: tileIcon.visible ? tileIcon.right : parent.left
-        anchors.leftMargin: tileIcon.visible ? 10 : 12
-        anchors.right: parent.right
-        anchors.rightMargin: 10
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 1
+        anchors.centerIn: parent
 
-        Text {
-            width: parent.width
-            text: tile.label
-            elide: Text.ElideRight
-            color: tile.active ? Theme.accentText : Theme.text
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.labelSize
-            font.weight: 600
+        spacing: 3
+
+        Icon {
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: tile.iconName !== ""
+            iconName: tile.iconName !== "" ? tile.iconName : "settings"
+            iconSize: 18
+            color: tile.active ? Theme.onAccent : Theme.textDim
         }
 
         Text {
-            width: parent.width
-            visible: tile.sublabel !== ""
-            text: tile.sublabel
-            elide: Text.ElideRight
-            color: Theme.textMute
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: tile.label
+            color: tile.active ? Theme.onAccent : Theme.text
             font.family: Theme.fontFamily
             font.pixelSize: Theme.descSize
+            font.weight: 600
         }
-    }
-
-    Rectangle {
-        anchors.fill: parent
-        radius: parent.radius
-        color: Theme.alpha(Theme.textBase, 0.07)
-        visible: tileArea.containsMouse
     }
 
     MouseArea {

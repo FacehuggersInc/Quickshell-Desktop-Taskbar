@@ -68,8 +68,9 @@ PopupPanel {
                         source: modelData.icon && modelData.icon !== "*"
                             ? modelData.icon
                             : root.iconSource("open_app")
-                        width: 20; height: 20
-                        sourceSize.width: 20; sourceSize.height: 20
+                        Layout.preferredWidth: 20
+                        Layout.preferredHeight: 20
+                        sourceSize.width: 40; sourceSize.height: 40
                         fillMode: Image.PreserveAspectFit
                         smooth: true
                     }

@@ -16,6 +16,9 @@ PopupPanel {
     fadingEffectMax: 1.0
     scrollingEffect: false
 
+    // Without this the panel had no grab and clicking away never closed it
+    requireFocusGrab: true
+
     property var appWindow: null
 
     signal runRequested()
@@ -24,6 +27,7 @@ PopupPanel {
     signal overviewRequested()
     signal wallpaperRequested()
     signal gamingRequested()
+    signal powerRequested()
 
     component DropdownButton: RoundButton {
         property string iconName: ""
@@ -35,10 +39,10 @@ PopupPanel {
         horizontalPadding: 16
         contentItem: RowLayout {
             spacing: 6
-            Image {
-                source: root.iconSource(parent.parent.iconName)
-                width: 14; height: 14
-                fillMode: Image.PreserveAspectFit
+            Icon {
+                iconName: parent.parent.iconName
+                iconSize: 15
+                color: Theme.textDim
             }
             Text {
                 text: parent.parent.text
@@ -152,6 +156,17 @@ PopupPanel {
             onClicked: {
                 addDropdown.forceClose()
                 addDropdown.settingsRequested("")
+            }
+        }
+
+        Divider {}
+
+        DropdownButton {
+            text: "Power"
+            iconName: "power"
+            onClicked: {
+                addDropdown.forceClose()
+                addDropdown.powerRequested()
             }
         }
     }

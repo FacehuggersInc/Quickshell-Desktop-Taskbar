@@ -174,11 +174,11 @@ PopupWindow {
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                 ScrollBar.vertical.policy: ScrollBar.AsNeeded
                 contentHeight: notifColumn.implicitHeight
-                contentWidth: notificationsPanel.implicitWidth - 32
+                contentWidth: availableWidth
 
                 ColumnLayout {
                     id: notifColumn
-                    width: notificationsPanel.implicitWidth - 32
+                    width: notifScroll.availableWidth
                     spacing: 8
                     x: 16
 

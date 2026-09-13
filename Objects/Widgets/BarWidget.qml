@@ -14,11 +14,15 @@ Loader {
     active: widgetId !== ""
 
     sourceComponent: {
+        if (widgetId === "menu") return menuComponent
         if (widgetId === "workspaces") return workspacesComponent
         if (widgetId === "appbar") return appbarComponent
         if (widgetId === "clock") return clockComponent
         if (widgetId === "date") return dateComponent
+        if (widgetId === "week") return weekComponent
         if (widgetId === "volume") return volumeComponent
+        if (widgetId === "mic") return micComponent
+        if (widgetId === "media") return mediaComponent
         if (widgetId === "network") return networkComponent
         if (widgetId === "bluetooth") return bluetoothComponent
         if (widgetId === "tray") return trayComponent
@@ -27,11 +31,15 @@ Loader {
         return null
     }
 
+    Component { id: menuComponent; MenuWidget {} }
     Component { id: workspacesComponent; WorkspaceSwitcherWidget {} }
     Component { id: appbarComponent; AppBarWidget {} }
     Component { id: clockComponent; ClockWidget {} }
     Component { id: dateComponent; DateWidget {} }
+    Component { id: weekComponent; WeekWidget {} }
     Component { id: volumeComponent; VolumeWidget {} }
+    Component { id: micComponent; MicWidget {} }
+    Component { id: mediaComponent; MediaWidget {} }
     Component { id: networkComponent; NetworkWidget {} }
     Component { id: bluetoothComponent; BluetoothWidget {} }
     // SystemTray is a RoundedBlock in its own right. Inside a zone it has to

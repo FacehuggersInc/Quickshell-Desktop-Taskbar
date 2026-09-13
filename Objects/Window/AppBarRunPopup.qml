@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Layouts
 
 import qs.Objects.Design
+import qs.Objects.Systems
 import qs.Objects.Design.Controls
 import qs.Objects.Theme
 import qs.Objects.Widgets
@@ -87,13 +88,10 @@ PopupPanel {
             return
 
         runPopup.remember(text)
+        RecentSystem.noteCommand(text)
 
         if (inTerminal) {
-            var custom = (root.settings.commands || ({})).terminal_run || ""
-            if (custom.indexOf("{command}") !== -1)
-                root.execute(root.cmd("terminal_run", { "command": text }))
-            else
-                root.execute(root.cmd("terminal_run").concat([text]))
+            root.runInTerminal(text, text)
         } else {
             root.execute(text.split(" "))
         }

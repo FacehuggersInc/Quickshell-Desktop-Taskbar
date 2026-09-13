@@ -1,71 +1,74 @@
 import Quickshell
-import Quickshell.Wayland
 import Quickshell.Io
+import Quickshell.Hyprland
 import QtQuick
-import QtQuick.Effects
 import QtQuick.Layouts
 import QtQuick.Controls
-import QtQuick.Window
-import Quickshell.Hyprland
-import Qt5Compat.GraphicalEffects
 
 import qs.Objects.Design
-import qs.Objects.Widgets
-import qs.Objects.Window
+import qs.Objects.Design.Controls
 import qs.Objects.Theme
+import qs.Objects.Systems
+import qs.Objects.Window
 
-PopupWindow {
+// Two sources in one list: what this shell launched, and what the user typed in
+// a terminal. Rebuilt on the shared controls, searchable, with the source of
+// each entry stated rather than mixed silently.
+PopupPanel {
     id: historyPopup
 
-    anchor.window: mainWindow
-    anchor.rect.x: 0
-    anchor.rect.y: mainWindow.popupOffset(implicitHeight)
+    implicitWidth: 720
 
-    property int panelWidth: 420
-    property int panelHeight: Math.min(Screen.height - mainWindow.height - 20, 500)
+    // Capped, then the list scrolls. Forty rows at 44px ran off the screen.
+    readonly property int maxHeight:
+        Math.min(560, Screen.height - mainWindow.height - 40)
+    implicitHeight: Math.min(body.implicitHeight + tbPadding * 2, historyPopup.maxHeight)
+    sidePadding: 14
+    tbPadding: 12
+    fadingEffectMax: 1.0
+    scrollingEffect: false
+    requireFocusGrab: true
 
-    implicitWidth: panelWidth
-    implicitHeight: panelHeight
-    color: "transparent"
-    visible: false
-
-    mask: Region { item: background }
-
-    property Region glassBlurRegion: Region { item: background }
-    BackgroundEffect.blurRegion:
-        (Theme.glass && Theme.blurMode === "protocol") ? glassBlurRegion : null
-
-    property bool isClosing: false
-    property var commands: []
-    property string searchQuery: ""
-
-    property var filteredCommands: {
-        if (!searchQuery || searchQuery.trim() === "") return commands
-        var q = searchQuery.toLowerCase()
-        return commands.filter(function(c) { return c.toLowerCase().includes(q) })
-    }
-
+    // Kept from the previous version: the app bar listens for this to show its
+    // launch confirmation
     signal commandSelected(string command)
 
-    PropertyAnimation {
-        id: alphaAnim
-        target: background
-        property: "opacity"
-        duration: 150
-        onFinished: {
-            if (historyPopup.isClosing) {
-                historyPopup.visible = false
-                historyPopup.isClosing = false
-                background.opacity = 0
+    property var shellHistory: []
+    property string query: ""
+    property string source: "all"
+
+    readonly property var entries: {
+        var q = historyPopup.query.trim().toLowerCase()
+        var out = []
+
+        if (historyPopup.source !== "shell") {
+            var recents = RecentSystem.combined
+            for (var i = 0; i < recents.length; i++) {
+                if (q === "" || recents[i].label.toLowerCase().indexOf(q) !== -1)
+                    out.push({
+                        text: recents[i].payload,
+                        label: recents[i].label,
+                        origin: RecentSystem.relative(recents[i].at),
+                        fromShell: false
+                    })
             }
         }
-    }
 
-    HyprlandFocusGrab {
-        id: focusGrab
-        active: false
-        windows: [ historyPopup ]
-        onCleared: historyPopup.forceClose()
+        if (historyPopup.source !== "launched") {
+            for (var j = 0; j < historyPopup.shellHistory.length; j++) {
+                var line = historyPopup.shellHistory[j]
+                if (q !== "" && line.toLowerCase().indexOf(q) === -1)
+                    continue
+                out.push({
+                    text: line,
+                    label: line,
+                    origin: "terminal",
+                    fromShell: true
+                })
+            }
+        }
+
+        return out.slice(0, 60)
     }
 
     Process {
@@ -74,192 +77,181 @@ PopupWindow {
         stdout: StdioCollector {
             onStreamFinished: {
                 var text = this.text.trim()
-                if (!text || text === "none") {
-                    historyPopup.commands = []
-                    return
-                }
-                historyPopup.commands = text.split("\n").filter(function(c) { return c.trim() !== "" })
+                historyPopup.shellHistory = text === "" ? [] : text.split("\n")
             }
         }
     }
 
-    Rectangle {
-        id: background
-        width: panelWidth
-        height: panelHeight
-        radius: 15
-        color: Theme.panelScrim
-        border.width: Theme.borderWidth
-        border.color: Theme.border
-        opacity: 0
-        clip: true
-
-        layer.enabled: true
-        layer.effect: MultiEffect {
-            shadowEnabled: true
-            shadowColor: Theme.shadow
-            shadowBlur: 0.7
-            shadowVerticalOffset: 2
-            shadowHorizontalOffset: 0
-            blurMax: 24
-        }
-
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 12
-            spacing: 8
-
-            // Header
-            RowLayout {
-                Layout.fillWidth: true
-                Text {
-                    text: "Command History"
-                    color: Theme.text
-                    font.family: Theme.fontFamily
-                    font.weight: 700
-                    font.pixelSize: 16
-                    Layout.fillWidth: true
-                }
-                IconButton {
-                    iconName: "close"
-                    iconSize: 16
-                    color: Theme.text
-                    tooltipText: "Close"
-                    onClicked: historyPopup.forceClose()
-                }
-            }
-
-            // Search
-            Rectangle {
-                Layout.fillWidth: true
-                height: 34
-                radius: 8
-                color: Theme.alpha(Theme.textBase, 0.10)
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 6
-
-                    Icon {
-    iconName: "search"
-    iconSize: 16
-    color: Theme.accentIcon
-    opacity: 0.5
-}
-
-                    TextField {
-                        id: searchField
-                        Layout.fillWidth: true
-                        placeholderText: "Search commands..."
-                        color: Theme.text
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 13
-                        background: Item {}
-                        onTextChanged: historyPopup.searchQuery = text
-                    }
-                }
-            }
-
-            // Empty state
-            Text {
-                visible: historyPopup.filteredCommands.length === 0
-                text: historyPopup.commands.length === 0
-                    ? "No history found"
-                    : "No matches"
-                color: Theme.text
-                opacity: 0.4
-                font.family: Theme.fontFamily
-                font.pixelSize: 13
-                Layout.alignment: Qt.AlignHCenter
-            }
-
-            // Command list
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                contentHeight: cmdColumn.implicitHeight
-                clip: true
-
-                ColumnLayout {
-                    id: cmdColumn
-                    width: panelWidth - 24
-                    spacing: 2
-
-                    Repeater {
-                        model: historyPopup.filteredCommands
-                        delegate: RoundButton {
-                            required property var modelData
-                            required property int index
-                            Layout.fillWidth: true
-                            padding: 6
-                            horizontalPadding: 10
-
-                            contentItem: RowLayout {
-                                spacing: 8
-                                Icon {
-    iconName: "terminal"
-    iconSize: 16
-    color: Theme.accentIcon
-    opacity: 0.5
-}
-                                Text {
-                                    text: modelData
-                                    color: Theme.text
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: 13
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-                            }
-                            background: Rectangle {
-                                radius: 6
-                                color: cmdHov.hovered ? Theme.accent : "transparent"
-                                opacity: cmdHov.hovered ? 0.18 : 1
-                            }
-                            HoverHandler { id: cmdHov; cursorShape: Qt.PointingHandCursor }
-                            onClicked: {
-                                historyPopup.commandSelected(modelData)
-                                historyPopup.forceClose()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    function updatePosition(widget) {
-        let pos = mainWindow.itemPosition(widget)
-        historyPopup.anchor.rect.x = (pos.x + widget.width / 2) - panelWidth / 2
-    }
-
-    function forceOpen(widget) {
-        if (isClosing) { alphaAnim.stop(); isClosing = false }
-        updatePosition(widget)
-        background.opacity = 0
-        historyPopup.visible = true
-        alphaAnim.from = 0
-        alphaAnim.to = 1.0
-        alphaAnim.start()
-        focusGrab.active = true
-        searchField.text = ""
-        historyPopup.searchQuery = ""
+    function refresh() {
         if (!historyProc.running) historyProc.running = true
     }
 
-    function forceClose() {
-        if (isClosing) return
-        isClosing = true
-        alphaAnim.from = background.opacity
-        alphaAnim.to = 0
-        alphaAnim.start()
-        focusGrab.active = false
+    onOpen: {
+        historyPopup.query = ""
+        searchField.text = ""
+        historyPopup.refresh()
+        searchField.focusInput()
     }
 
-    function toggle(widget) {
-        if (!historyPopup.visible || isClosing) forceOpen(widget)
-        else forceClose()
+    function run(entry, inTerminal) {
+        historyPopup.forceClose()
+
+        if (inTerminal) {
+            root.runInTerminal(entry.text, entry.text)
+            return
+        }
+
+        // The owner runs it and reports, so the confirmation still appears
+        historyPopup.commandSelected(entry.text)
+    }
+
+    content: ColumnLayout {
+        id: body
+        spacing: 8
+
+        Keys.onEscapePressed: historyPopup.forceClose()
+
+        RowLayout {
+            id: headerRow
+            Layout.fillWidth: true
+            spacing: Theme.gap
+
+            Icon {
+                iconName: "history"
+                iconSize: 19
+                color: Theme.accentIcon
+            }
+
+            InputField {
+                id: searchField
+                Layout.fillWidth: true
+                Layout.preferredHeight: 32
+                placeholder: "Search history"
+                onTextChanged: historyPopup.query = text
+            }
+
+            SegmentedControl {
+                width: 230
+                options: [
+                    { label: "All", value: "all" },
+                    { label: "Launched", value: "launched" },
+                    { label: "Terminal", value: "shell" }
+                ]
+                value: historyPopup.source
+                onPicked: (v) => historyPopup.source = v
+            }
+
+            ActionButton {
+                label: "Close"
+                onActivated: historyPopup.forceClose()
+            }
+        }
+
+        Text {
+            Layout.fillWidth: true
+            visible: historyPopup.entries.length === 0
+            text: "Nothing here yet."
+            color: Theme.textMute
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.descSize
+        }
+
+        ScrollView {
+            id: historyScroll
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(listColumn.implicitHeight,
+                historyPopup.maxHeight - headerRow.height - 40)
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+            ColumnLayout {
+                id: listColumn
+                width: historyScroll.availableWidth
+                spacing: 4
+
+        Repeater {
+            model: historyPopup.entries
+
+            delegate: Rectangle {
+                id: entryRow
+                required property var modelData
+
+                Layout.fillWidth: true
+                Layout.preferredHeight: 44
+                radius: Theme.radiusSmall
+                color: entryArea.containsMouse ? Theme.alpha(Theme.accent, 0.18)
+                                               : Theme.alpha(Theme.scrimBase, 0.30)
+                border.width: Theme.borderWidth
+                border.color: Theme.alpha(Theme.textBase, 0.08)
+
+                Icon {
+                    id: entryIcon
+                    anchors.left: parent.left
+                    anchors.leftMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    iconName: entryRow.modelData.fromShell ? "terminal" : "open_app"
+                    iconSize: 15
+                    color: Theme.textMute
+                }
+
+                Column {
+                    anchors.left: entryIcon.right
+                    anchors.leftMargin: 10
+                    anchors.right: entryActions.left
+                    anchors.rightMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 0
+
+                    Text {
+                        width: parent.width
+                        text: entryRow.modelData.label
+                        elide: Text.ElideRight
+                        color: Theme.text
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.valueSize
+                        font.weight: 600
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: entryRow.modelData.origin
+                        elide: Text.ElideRight
+                        color: Theme.textMute
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.descSize
+                    }
+                }
+
+                Row {
+                    id: entryActions
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 6
+
+                    ActionButton {
+                        label: "Run"
+                        tone: "accent"
+                        onActivated: historyPopup.run(entryRow.modelData, false)
+                    }
+
+                    ActionButton {
+                        label: "Terminal"
+                        onActivated: historyPopup.run(entryRow.modelData, true)
+                    }
+                }
+
+                MouseArea {
+                    id: entryArea
+                    anchors.fill: parent
+                    z: -1
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: historyPopup.run(entryRow.modelData, false)
+                }
+            }
+        }
+            }
+        }
     }
 }

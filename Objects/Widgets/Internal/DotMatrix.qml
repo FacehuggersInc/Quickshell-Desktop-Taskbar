@@ -11,6 +11,13 @@ Item {
     property real charGap: 3
     property color onColor: Theme.accentText
     property color offColor: Theme.alpha(Theme.textBase, 0.07)
+
+    // ## Drain
+    // 1 means full, 0 means empty, -1 means not draining at all. Dots go out
+    // from the bottom up as it falls, so the glyphs visibly empty rather than
+    // merely changing colour.
+    property real drain: -1
+    property color drainColor: Theme.warn
     property bool showUnlit: true
 
     // Lit dots sit on a dark offset twin. Without it the display disappears
@@ -96,9 +103,20 @@ Item {
                         Rectangle {
                             anchors.fill: parent
                             radius: matrix.dotSize / 2
-                            color: cell.lit ? matrix.onColor : matrix.offColor
 
-                            Behavior on color { ColorAnimation { duration: Theme.durFast } }
+                            // A row is still on while the drain level is above
+                            // it. Row 0 is the top, so the fill empties upward.
+                            readonly property bool drained:
+                                matrix.drain >= 0
+                                && (glyph.rows.length - cell.rowIndex)
+                                    > Math.ceil(matrix.drain * glyph.rows.length)
+
+                            color: !cell.lit ? matrix.offColor
+                                : (drained ? matrix.offColor
+                                    : (matrix.drain >= 0 && matrix.drain < 0.34
+                                        ? matrix.drainColor : matrix.onColor))
+
+                            Behavior on color { ColorAnimation { duration: Theme.durNormal } }
                         }
                     }
                 }

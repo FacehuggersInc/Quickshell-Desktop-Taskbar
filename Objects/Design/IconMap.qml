@@ -18,6 +18,23 @@ QtObject {
     readonly property bool useFont:
         mode === "font" ? true : (mode === "images" ? false : map.fontPresent)
 
+    // Verified Material Symbols names this shell uses directly. A name that is
+    // in neither this list nor the alias map is treated as unknown, so it can
+    // never render as its own text — which is exactly what volume_med did.
+    readonly property var passthrough: [
+        "apps", "bluetooth", "bluetooth_searching", "close", "dark_mode",
+        "download", "history", "light_mode", "lock", "refresh", "search",
+        "settings", "terminal", "upload", "wallpaper"
+    ]
+
+    function known(name) {
+        if (!name || name === "")
+            return false
+        if (map.aliases[name] !== undefined)
+            return true
+        return map.passthrough.indexOf(name) !== -1
+    }
+
     readonly property var aliases: ({
         "backlight_high": "brightness_high",
         "backlight_low": "brightness_low",
@@ -38,6 +55,7 @@ QtObject {
         "music_pause": "pause",
         "music_play": "play_arrow",
         "music_prev": "skip_previous",
+        "music_next": "skip_next",
         "music_skip": "skip_next",
         "no": "block",
         "notify": "notifications",
@@ -49,7 +67,9 @@ QtObject {
         "restart": "restart_alt",
         "screenshot": "screenshot_monitor",
         "stop": "power_settings_new",
+        "power": "power_settings_new",
         "volume_max": "volume_up",
+        "volume_med": "volume_down",
         "volume_min": "volume_down",
         "volume_mute": "volume_off",
         "vpn": "vpn_lock",

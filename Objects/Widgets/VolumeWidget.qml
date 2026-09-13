@@ -6,6 +6,8 @@ import QtQuick.Layouts
 import QtQuick.Controls
 
 import qs.Objects.Design
+import qs.Objects.Theme
+import qs.Objects.Widgets.Internal
 import qs.Objects.Window
 
 RowLayout{
@@ -17,6 +19,20 @@ RowLayout{
     // what the volume is
     property int volumeLevel: 0
     property bool volumeMuted: false
+
+    // "icon" is the plain glyph, "text" adds the percentage, "dots" draws it
+    // in the same matrix the clock uses, "meter" shows it as rising bars
+    readonly property bool showIcon: {
+        var bump = root.settingsRevision
+        var widgets = root.settings.widgets || ({})
+        return widgets.volumeIcon !== false
+    }
+
+    readonly property string style: {
+        var bump = root.settingsRevision
+        var widgets = root.settings.widgets || ({})
+        return widgets.volumeStyle ? widgets.volumeStyle : "text"
+    }
     spacing: 0
 
     function getStyleFromPercentage(str){
@@ -32,55 +48,9 @@ RowLayout{
         }
     }
 
-    function toggleMicMute(){
-        micToggleProc.running = true
-        console.log(currentlyPlaying)
-    }
-
-    Process {
-        id: micToggleProc
-        command: root.newUtill(["--togglemic"])
-        stdout: StdioCollector {
-            onStreamFinished: micButton.setState(this.text)
-        }
-    }
-
-    IconButton {
-        id: songButton
-        color: root.theme.primary
-        iconName: root.media.status == "Playing" ? "music_note_single" : "music_off"
-        iconSize: 22
-        visible: root.media.status == "Playing" ? true : (root.media.status == "Paused" ? true : false)
-        tooltipText: {
-            return root.media.title + " : " + root.media.artist
-        }
-        onClicked: toggleCommand.running = true
-        Process { id: toggleCommand; command: root.cmd("media_toggle") }
-    }
-
-    IconButton {
-        id: micButton
-        iconName: "microphone_alert"
-        iconSize: 22
-        tooltipText: "Toggle Mic"
-
-        function setState(state){
-            if (state.includes("off")){
-                micButton.setIcon("microphone_mute")
-                micButton.setColor(root.theme.primary)
-                micButton.tooltipText = "Toggle Mic: On"
-            } else if (state.includes("on")) { 
-                micButton.setIcon("microphone")
-                micButton.setColor('#ff4a4a')
-                micButton.tooltipText = "Toggle Mic: Off"
-            }
-        }
-
-        onClicked: toggleMicMute()
-    }
-
     IconButton {
         id: volumeButton
+        visible: volumeWidget.showIcon || volumeWidget.style === "text"
         iconName: "volume_max"
         iconSize: 30
         tooltipText: "Volume Control"
@@ -112,20 +82,19 @@ RowLayout{
                     volumeWidget.volumeMuted = !volumeActive.includes("on")
 
                     if (volumeActive.includes("on")){
-                        var style = getStyleFromPercentage(parts[0].replace("%", ""))
-                        volumeButton.setColor(style[0])
-                        volumeButton.setIcon(style[1])
-                        volumeButton.text = style[2] + "%"
+                        var look = getStyleFromPercentage(parts[0].replace("%", ""))
+                        volumeButton.setColor(look[0])
+                        volumeButton.setIcon(look[1])
+                        volumeButton.text = volumeWidget.style === "text"
+                            ? look[2] + "%" : ""
                     
                     //Volume Mute
                     } else {
-                        volumeButton.setColor('#848484') 
+                        volumeButton.setColor(Theme.textMute)
                         volumeButton.setIcon("volume_mute")
-                        volumeButton.text = "Mute"
+                        volumeButton.text = volumeWidget.style === "text" ? "Mute" : ""
                     }
       
-                    micButton.setState(parts[3])
-
                     if (root.audioPopup) root.audioPopup.updateSliderInfo(true)
                 }
             }
@@ -135,6 +104,24 @@ RowLayout{
             if (root.audioPopup) root.audioPopup.toggle(volumeWidget)
         }
 
+    }
+
+    LevelMeter {
+        Layout.alignment: Qt.AlignVCenter
+        visible: volumeWidget.style === "meter"
+        level: volumeWidget.volumeLevel / 100
+        muted: volumeWidget.volumeMuted
+    }
+
+    DotMatrix {
+        Layout.alignment: Qt.AlignVCenter
+        visible: volumeWidget.style === "dots"
+        text: volumeWidget.volumeMuted ? "" : String(volumeWidget.volumeLevel)
+        dotSize: 2
+        dotGap: 1.2
+        charGap: 3
+        onColor: Theme.accentText
+        offColor: Theme.alpha(Theme.textBase, 0.07)
     }
 }
 

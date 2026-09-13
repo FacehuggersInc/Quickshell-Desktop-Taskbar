@@ -15,6 +15,7 @@ IconButton {
     color: '#252525'
 
     Component.onCompleted: {
+        root.notificationsPanel = notificationsPanel
         root.notifyServer.notification.connect(notifyWidget.onNewNotification)
         notifyWidget.updateBadge()
     }

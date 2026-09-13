@@ -100,7 +100,10 @@ Item {
                     anchors.fill: parent
                                         cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        control.value = segment.modelData.value
+                        // No assignment here. Writing value breaks whatever
+                        // binding the caller gave it, so the control stops
+                        // following its source — which is how a view could be
+                        // reopened showing the wrong tab.
                         control.picked(segment.modelData.value)
                     }
                 }

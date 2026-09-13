@@ -26,6 +26,13 @@ PopupPanel {
     property var contextIcon: null
     signal launched()
 
+    // Last arguments used, per app. Relaunching with the same flags was a
+    // retype every time.
+    property var lastArgs: ({})
+
+    readonly property string rememberedKey:
+        argPopup.contextTarget ? (argPopup.contextTarget.name || "") : ""
+
     readonly property string baseCommand:
         argPopup.contextTarget ? (argPopup.contextTarget.command || "") : ""
 
@@ -50,13 +57,22 @@ PopupPanel {
             ? argPopup.baseCommand.split(" ")
             : root.combine(argPopup.baseCommand.split(" "), extra.split(" ")))
 
+        if (argPopup.rememberedKey !== "") {
+            var next = ({})
+            for (var key in argPopup.lastArgs)
+                next[key] = argPopup.lastArgs[key]
+            next[argPopup.rememberedKey] = extra
+            argPopup.lastArgs = next
+        }
+
         argPopup.forceClose()
-        inputField.text = ""
         argPopup.launched()
     }
 
     onOpen: {
-        inputField.text = ""
+        var remembered = argPopup.rememberedKey !== ""
+            ? argPopup.lastArgs[argPopup.rememberedKey] : ""
+        inputField.text = remembered ? remembered : ""
         inputField.focusInput()
     }
 

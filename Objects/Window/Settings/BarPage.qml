@@ -20,11 +20,15 @@ Item {
     ]
 
     readonly property var catalogue: [
+        { id: "menu", label: "Menu", icon: "apps" },
         { id: "workspaces", label: "Workspaces", icon: "apps" },
         { id: "appbar", label: "App Bar", icon: "open_app" },
         { id: "clock", label: "Clock", icon: "history" },
-        { id: "date", label: "Date", icon: "wallpaper" },
+        { id: "date", label: "Calendar", icon: "history" },
+        { id: "week", label: "Week", icon: "history" },
         { id: "volume", label: "Volume", icon: "volume_max" },
+        { id: "mic", label: "Microphone", icon: "microphone" },
+        { id: "media", label: "Media", icon: "music_play" },
         { id: "network", label: "Network", icon: "wired" },
         { id: "bluetooth", label: "Bluetooth", icon: "bluetooth" },
         { id: "tray", label: "Tray", icon: "settings" },
@@ -33,9 +37,9 @@ Item {
     ]
 
     readonly property var defaults: ({
-        "left": ["workspaces"],
+        "left": ["menu", "workspaces"],
         "center": ["appbar"],
-        "right": ["clock", "date", "separator", "volume",
+        "right": ["media", "clock", "date", "separator", "volume", "mic",
                   "network", "bluetooth", "tray", "notifications"]
     })
 

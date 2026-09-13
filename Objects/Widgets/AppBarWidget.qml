@@ -919,6 +919,10 @@ RoundedBlock{
             args = root.combine(args, opts[optionsIndex])
         }
         root.execute(args)
+
+        // Deliberate, so worth remembering — unlike the commands the shell runs
+        // for itself, which used to flood the list
+        RecentSystem.noteApp(data.name, args.join(" "), data.icon)
     }
 
     function togglePin(target) {
@@ -1356,7 +1360,9 @@ RoundedBlock{
     RowLayout{
         id: row
         anchors.centerIn: parent
-        spacing: 15
+
+        // Was a hardcoded 15, which fought the bar's own widget spacing
+        spacing: mainWindow.widgetSpacing
 
         Tooltip {
             id: tooltip

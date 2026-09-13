@@ -61,20 +61,20 @@ PopupWindow {
         onTriggered: popup.toggle()
     }
 
-    RowLayout {
-        width: popup.width
+    Item {
+        width: popup.implicitWidth
         height: display.implicitHeight
 
         Notification {
             id: display
+            anchors.left: parent.left
+            anchors.right: parent.right
             notification: popup.notification
-            Layout.alignment: Qt.AlignCenter
-            Layout.fillWidth: true
         }
     }
 
     function setPopupIcon(iconName) {
-        display.setIcon(iconName)
+        // Icon resolution lives in Notification now
     }
 
     function updatePopupPosition() {

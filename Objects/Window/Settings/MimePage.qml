@@ -13,7 +13,7 @@ ColumnLayout {
 
     property string query: ""
     property string category: ""
-    property string state: "all"
+    property string filterState: "all"
 
     // The type being reassigned through the chooser
     property string pendingMime: ""
@@ -32,11 +32,11 @@ ColumnLayout {
             if (page.category !== "" && entry.mime.split("/")[0] !== page.category)
                 continue
 
-            if (page.state === "assigned" && entry.current === "")
+            if (page.filterState === "assigned" && entry.current === "")
                 continue
-            if (page.state === "unhandled" && entry.candidates.length > 0)
+            if (page.filterState === "unhandled" && entry.candidates.length > 0)
                 continue
-            if (page.state === "available"
+            if (page.filterState === "available"
                     && (entry.candidates.length === 0 || entry.current !== ""))
                 continue
 
@@ -97,8 +97,8 @@ ColumnLayout {
                 { label: "Unclaimed", value: "available" },
                 { label: "No app", value: "unhandled" }
             ]
-            value: page.state
-            onPicked: (v) => page.state = v
+            value: page.filterState
+            onPicked: (v) => page.filterState = v
         }
     }
 

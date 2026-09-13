@@ -44,7 +44,9 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.preferredHeight: 76
         label: "New Shortcut"
-        description: "Written into your Hyprland lua config, grouped with the others"
+        description: HotkeySystem.constHint !== ""
+            ? "Type a variable or its value — " + HotkeySystem.constHint
+            : "Written into your Hyprland lua config, grouped with the others"
         stacked: true
 
         RowLayout {
@@ -54,7 +56,8 @@ ColumnLayout {
             InputField {
                 id: newKey
                 Layout.preferredWidth: 200
-                placeholder: "SUPER + K"
+                placeholder: HotkeySystem.consts.length > 0
+                    ? HotkeySystem.consts[0].name + " + K" : "SUPER + K"
             }
 
             InputField {
