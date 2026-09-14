@@ -459,7 +459,8 @@ PopupWindow {
                                 quickPanel.forceClose()
                                 if (root.notificationsPanel)
                                     root.notificationsPanel.forceOpen(
-                                        mainWindow.settingsAnchor)
+                                        root.menuAnchor ? root.menuAnchor
+                                                        : mainWindow.settingsAnchor)
                             }
                         }
 
@@ -735,7 +736,9 @@ PopupWindow {
             // What this shell has launched, newest first
 
             Repeater {
-                model: RecentSystem.combined.slice(0, 4)
+                // Three at most. More than that grew the grid past the panel
+                // and pushed the toolbar out of view.
+                model: RecentSystem.combined.slice(0, 3)
 
                 delegate: PanelRow {
                     required property var modelData

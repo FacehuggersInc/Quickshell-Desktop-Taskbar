@@ -170,7 +170,7 @@ PopupPanel {
                                 iconName: modelData.icon ? modelData.icon : ""
                                 iconSize: 15
                                 color: Theme.textDim
-                                visible: !popup.trayMode && modelData.icon
+                                visible: !popup.trayMode && modelData.icon !== undefined && modelData.icon !== ""
                             }
                             Text {
                                 text: actionBtn.text
@@ -308,7 +308,7 @@ PopupPanel {
                             iconName: modelData.icon ? modelData.icon : ""
                             iconSize: 15
                             color: Theme.textDim
-                            visible: !popup.trayMode && modelData.icon
+                            visible: !popup.trayMode && modelData.icon !== undefined && modelData.icon !== ""
                         }
                         Text {
                             text: modelData.name || ""

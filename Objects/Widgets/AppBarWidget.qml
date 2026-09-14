@@ -763,7 +763,12 @@ RoundedBlock{
                 if (i > ( root.settings.launcherflags.maxOptions || 10 )) break
                 var index = contextTarget.options.length - 1 - i
                 var optSet = contextTarget.options[index]
-                jumpItems.push({"name": optSet[0], "action":"launch:custom", "icon":"terminal", "index": index})
+                jumpItems.push({
+                    "name": appBarWidget.optionLabel(optSet),
+                    "action": "launch:custom",
+                    "icon": "terminal",
+                    "index": index
+                })
             }
             items.push({
                 "name": "Jump List (" + jumpItems.length + ")",
@@ -869,11 +874,15 @@ RoundedBlock{
             "children": masqueItems
         })
 
-        if (appHasNoOptionsFlag(contextTarget.name)) {
-            items.push({"name": "Arg Options: Turn OFF", "action": "toggleOptions", "icon": "settings"})
-        } else {
-            items.push({"name": "Arg Options: Turn ON", "action": "toggleOptions", "icon": "settings"})
-        }
+        // Reads as current state, the same way the gaming entry below does.
+        // It previously named the action instead, and named it backwards, so
+        // the entry appeared to say the opposite of what was set.
+        var usesOptions = !appHasNoOptionsFlag(contextTarget.name)
+        items.push({
+            "name": usesOptions ? "Arg Options: ON" : "Arg Options: OFF",
+            "action": "toggleOptions",
+            "icon": "settings"
+        })
 
         // Gaming mode auto-trigger toggle
         var isGaming = isGamingApp(contextTarget.name)
@@ -907,7 +916,33 @@ RoundedBlock{
     }
 
     //CONTEXT MENU ACTIONS
-    function launch(data, includeOptions=true, optionsIndex=0){
+    // An option may be stored as a string ("--new-window") or as an array of
+    // arguments. combine() walks whatever it is given, so a string was pushed
+    // one character at a time and the launch quietly failed.
+    // Shown in the jump list. A string option was being indexed as an array,
+    // so the entry was labelled with its first character.
+    function optionLabel(option) {
+        if (!option)
+            return ""
+        if (typeof option === "string")
+            return option
+        return option.join(" ")
+    }
+
+    function optionArgs(option) {
+        if (!option)
+            return []
+        if (typeof option === "string") {
+            var text = option.trim()
+            return text === "" ? [] : text.split(/\s+/)
+        }
+        return option
+    }
+
+    // chosen means the arguments were picked deliberately from the jump list,
+    // so "ignore arguments" does not apply — that setting is about what the
+    // icon does, not about a choice just made by hand
+    function launch(data, includeOptions=true, optionsIndex=0, chosen=false){
         var opts = decodeOptions(data.options)
         // data.command may be a multi-word string from a .desktop Exec field
         // (e.g. "/usr/bin/flatpak run --branch=master ... com.app.Name")
@@ -915,8 +950,15 @@ RoundedBlock{
         // a binary whose name is the entire string.
         var cmdStr = data.command.trim()
         var args = cmdStr.includes(" ") ? cmdStr.split(/\s+/) : [cmdStr]
-        if (includeOptions && opts.length > 0) {
-            args = root.combine(args, opts[optionsIndex])
+
+        // The flag lives in launcherflags.ignoreOptions as a list of names.
+        // Reading data.ignoreOptions found nothing, because the model row never
+        // carries it — so the icon kept appending an argument.
+        var ignoring = appBarWidget.appHasNoOptionsFlag(data.name)
+        var wanted = includeOptions && (chosen || !ignoring)
+
+        if (wanted && opts.length > 0) {
+            args = root.combine(args, appBarWidget.optionArgs(opts[optionsIndex]))
         }
         root.execute(args)
 
@@ -1233,7 +1275,7 @@ RoundedBlock{
                 argPopup.forceOpen(appBarWidget)
             } else if (modelData.action === "launch:custom") {
                 if (contextTarget.command) {
-                    launch(contextTarget, true, modelData.index)
+                    launch(contextTarget, true, modelData.index, true)
                     launchPopup.setAndOpen(
                         contextTarget.nickname ? "Launching " + contextTarget.nickname : "Launching " + contextTarget.name,
                         contextIcon
@@ -1241,7 +1283,7 @@ RoundedBlock{
                 }
             } else if (modelData.action === "launch:last") {
                 if (contextTarget.command) {
-                    launch(contextTarget, true, 0)
+                    launch(contextTarget, true, 0, true)
                     launchPopup.setAndOpen(
                         contextTarget.nickname ? "Launching " + contextTarget.nickname : "Launching " + contextTarget.name,
                         contextIcon

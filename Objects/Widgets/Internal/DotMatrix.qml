@@ -13,9 +13,9 @@ Item {
     property color offColor: Theme.alpha(Theme.textBase, 0.07)
 
     // ## Drain
-    // 1 means full, 0 means empty, -1 means not draining at all. Dots go out
-    // from the bottom up as it falls, so the glyphs visibly empty rather than
-    // merely changing colour.
+    // 1 means plenty of time, 0 means it is about to fire, -1 means nothing is
+    // counting down. Only the colour of the lit dots changes — the digits stay
+    // readable throughout.
     property real drain: -1
     property color drainColor: Theme.warn
     property bool showUnlit: true
@@ -104,17 +104,23 @@ Item {
                             anchors.fill: parent
                             radius: matrix.dotSize / 2
 
-                            // A row is still on while the drain level is above
-                            // it. Row 0 is the top, so the fill empties upward.
-                            readonly property bool drained:
-                                matrix.drain >= 0
-                                && (glyph.rows.length - cell.rowIndex)
-                                    > Math.ceil(matrix.drain * glyph.rows.length)
+                            // Never turns a dot off. Emptying the glyphs made
+                            // the time unreadable exactly when it mattered, so
+                            // the drain only shifts colour: the lit dots warm
+                            // toward drainColor as the level falls.
+                            color: {
+                                if (!cell.lit)
+                                    return matrix.offColor
+                                if (matrix.drain < 0)
+                                    return matrix.onColor
 
-                            color: !cell.lit ? matrix.offColor
-                                : (drained ? matrix.offColor
-                                    : (matrix.drain >= 0 && matrix.drain < 0.34
-                                        ? matrix.drainColor : matrix.onColor))
+                                var heat = 1 - Math.max(0, Math.min(1, matrix.drain))
+                                return Qt.rgba(
+                                    matrix.onColor.r + (matrix.drainColor.r - matrix.onColor.r) * heat,
+                                    matrix.onColor.g + (matrix.drainColor.g - matrix.onColor.g) * heat,
+                                    matrix.onColor.b + (matrix.drainColor.b - matrix.onColor.b) * heat,
+                                    1)
+                            }
 
                             Behavior on color { ColorAnimation { duration: Theme.durNormal } }
                         }

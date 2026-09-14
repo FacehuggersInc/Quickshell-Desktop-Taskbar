@@ -443,7 +443,7 @@ PanelWindow {
                                             !entry.time || entry.time === ""
 
                                         width: parent.width
-                                        height: 15
+                                        height: 18
                                         radius: 3
 
                                         // Filled when it takes the whole day,
@@ -465,7 +465,7 @@ PanelWindow {
                                             elide: Text.ElideRight
                                             color: Theme.text
                                             font.family: Theme.fontFamily
-                                            font.pixelSize: 9
+                                            font.pixelSize: 11
                                         }
                                     }
                                 }
@@ -475,7 +475,7 @@ PanelWindow {
                                     text: "+" + (cell.dayEvents.length - 3) + " more"
                                     color: Theme.textMute
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: 9
+                                    font.pixelSize: 10
                                 }
                             }
 
@@ -555,10 +555,12 @@ PanelWindow {
                 }
 
                 // ## All day
-                // Outside the hours, since they do not belong anywhere on it
-                Flow {
+                // Full width bands above the hours. They occupy the whole day,
+                // so a chip the size of its title read as though it sat at a
+                // particular time.
+                ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: 6
+                    spacing: 3
                     visible: CalendarSystem.allDayOn(calendarWindow.selected).length > 0
 
                     Repeater {
@@ -567,23 +569,39 @@ PanelWindow {
                         delegate: Rectangle {
                             required property var modelData
 
-                            width: allDayLabel.implicitWidth + 26
-                            height: 28
+                            readonly property color tint:
+                                CalendarSystem.colourFor(modelData.source)
+
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 30
                             radius: Theme.radiusSmall
-                            color: Qt.rgba(
-                                CalendarSystem.colourFor(modelData.source).r,
-                                CalendarSystem.colourFor(modelData.source).g,
-                                CalendarSystem.colourFor(modelData.source).b, 0.30)
+                            color: Qt.rgba(tint.r, tint.g, tint.b, 0.32)
                             border.width: Theme.borderWidth
-                            border.color: CalendarSystem.colourFor(modelData.source)
+                            border.color: tint
 
                             Text {
-                                id: allDayLabel
-                                anchors.centerIn: parent
+                                anchors.left: parent.left
+                                anchors.leftMargin: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "ALL DAY"
+                                color: Theme.textMute
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 8
+                                font.weight: 700
+                                font.letterSpacing: 0.8
+                            }
+
+                            Text {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 70
+                                anchors.right: parent.right
+                                anchors.rightMargin: 12
+                                anchors.verticalCenter: parent.verticalCenter
                                 text: modelData.title
+                                elide: Text.ElideRight
                                 color: Theme.text
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.valueSize
+                                font.pixelSize: Theme.labelSize
                                 font.weight: 600
                             }
 
@@ -643,15 +661,25 @@ PanelWindow {
                                     anchors.left: parent.left
                                     anchors.top: parent.top
                                     anchors.topMargin: -6
-                                    width: 46
+                                    width: calendarWindow.wideClock ? 46 : 62
                                     horizontalAlignment: Text.AlignRight
                                     visible: parent.onHour
                                         || calendarWindow.increment >= 30
+                                    // Matches whichever format the bar clock uses
                                     text: {
                                         var hour = Math.floor(parent.minutes / 60)
                                         var minute = parent.minutes % 60
-                                        return (hour < 10 ? "0" : "") + hour + ":"
-                                            + (minute < 10 ? "0" : "") + minute
+                                        var pad = (minute < 10 ? "0" : "") + minute
+
+                                        if (calendarWindow.wideClock)
+                                            return (hour < 10 ? "0" : "") + hour
+                                                + ":" + pad
+
+                                        var shown = hour % 12
+                                        if (shown === 0)
+                                            shown = 12
+                                        return shown + ":" + pad
+                                            + (hour < 12 ? "am" : "pm")
                                     }
                                     color: parent.onHour ? Theme.textDim : Theme.textMute
                                     font.family: Theme.fontFamily
@@ -660,7 +688,7 @@ PanelWindow {
 
                                 Rectangle {
                                     anchors.left: parent.left
-                                    anchors.leftMargin: 54
+                                    anchors.leftMargin: calendarWindow.gutter
                                     anchors.right: parent.right
                                     anchors.top: parent.top
                                     height: Theme.borderWidth
@@ -673,8 +701,8 @@ PanelWindow {
                         // Now, when looking at today
                         Rectangle {
                             visible: calendarWindow.selected === CalendarSystem.todayStamp
-                            x: 54
-                            width: parent.width - 54
+                            x: calendarWindow.gutter
+                            width: parent.width - calendarWindow.gutter
                             height: 2
                             radius: 1
                             color: Theme.danger
@@ -702,8 +730,8 @@ PanelWindow {
                                     CalendarSystem.colourFor(modelData.source)
                                 readonly property bool local: modelData.source === ""
 
-                                x: 58
-                                width: parent.width - 68
+                                x: calendarWindow.gutter + 4
+                                width: parent.width - calendarWindow.gutter - 14
                                 y: calendarWindow.timeInset
                                     + CalendarSystem.minutesOf(modelData.time)
                                         * (calendarWindow.hourHeight / 60)
@@ -1597,6 +1625,15 @@ PanelWindow {
     // The 00:00 label is drawn above its own rule, so the whole thing needs
     // headroom or midnight is cut off by the top of the view
     readonly property int timeInset: 12
+
+    readonly property bool wideClock: {
+        var bump = root.settingsRevision
+        var widgets = root.settings.widgets || ({})
+        return widgets.clock24 === true
+    }
+
+    // Wider when the labels carry am and pm
+    readonly property int gutter: calendarWindow.wideClock ? 54 : 70
     readonly property int hourHeight:
         Math.round((60 / calendarWindow.increment) * calendarWindow.rowHeight)
     property int nowMinutes: 0

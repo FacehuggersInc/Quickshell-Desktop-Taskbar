@@ -27,7 +27,10 @@ Item {
         font.pixelSize: marquee.pixelSize
         font.weight: marquee.weight
         x: marquee.overflowing ? marquee.offset : 0
-        width: marquee.overflowing ? implicitWidth : marquee.width
+
+        // No width and no elide while scrolling. Giving it a width let Qt
+        // decide the text did not fit and add an ellipsis mid scroll.
+        width: marquee.overflowing ? 0 : marquee.width
         elide: marquee.overflowing ? Text.ElideNone : Text.ElideRight
     }
 

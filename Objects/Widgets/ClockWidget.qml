@@ -119,10 +119,12 @@ Item {
             dotGap: 1.5
             charGap: 4
             shadowSpread: 2
-            // The digits empty from the bottom as the last minute runs down,
-            // then flash when it fires
+            // Draining empties the digits, which is fine while counting down
+            // but leaves the time unreadable once it fires — so the alert only
+            // changes colour
             onColor: clock.alerting ? clock.pulseColour : Theme.accentText
             offColor: Theme.alpha(Theme.textBase, 0.07)
+            drainColor: Theme.warn
             drain: clock.alerting ? -1 : ClockSystem.drain
         }
 

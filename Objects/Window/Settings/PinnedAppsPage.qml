@@ -75,6 +75,37 @@ ColumnLayout {
         page.commit(list)
     }
 
+    // These live as lists of launcher names under launcherflags, which is what
+    // the app bar actually reads. Writing a boolean onto the launcher looked
+    // right in config and did nothing.
+    function flagged(list, name) {
+        var bump = page.revision + root.settingsRevision
+        var flags = root.settings.launcherflags || ({})
+        var entries = flags[list] || []
+        return entries.indexOf(name) !== -1
+    }
+
+    function toggleFlag(list, name) {
+        if (!root.settings.launcherflags)
+            root.settings.launcherflags = ({})
+        if (!root.settings.launcherflags[list])
+            root.settings.launcherflags[list] = []
+
+        var entries = root.settings.launcherflags[list].slice()
+        var at = entries.indexOf(name)
+        if (at === -1)
+            entries.push(name)
+        else
+            entries.splice(at, 1)
+
+        root.settings.launcherflags[list] = entries
+        root.saveSettings()
+        page.revision++
+
+        if (root.appBar && root.appBar.syncLaunchers)
+            root.appBar.syncLaunchers()
+    }
+
     function toggleGaming(className) {
         if (!root.settings.gaming)
             root.settings.gaming = ({ enabled: false, apps: [] })
@@ -222,8 +253,10 @@ ColumnLayout {
                         text: {
                             var bits = [appRow.modelData.command]
                             if (appRow.isGaming) bits.push("gaming")
-                            if (appRow.modelData.lockOptions) bits.push("locked")
-                            if (appRow.modelData.ignoreOptions) bits.push("ignores args")
+                            if (page.flagged("lockOptions", appRow.modelData.name))
+                                bits.push("locked")
+                            if (page.flagged("ignoreOptions", appRow.modelData.name))
+                                bits.push("ignores args")
                             if (appRow.modelData.masqueUnder)
                                 bits.push("under " + appRow.modelData.masqueUnder)
                             return bits.join("  ·  ")
@@ -324,19 +357,22 @@ ColumnLayout {
                     description: "Stop the shell adding entries it discovers itself"
 
                     ToggleSwitch {
-                        checked: appRow.modelData.lockOptions === true
-                        onToggled: (v) => page.update(appRow.index, "lockOptions", v)
+                        checked: page.flagged("lockOptions", appRow.modelData.name)
+                        onToggled: (v) => page.toggleFlag("lockOptions",
+                            appRow.modelData.name)
                     }
                 }
 
                 SettingRow {
                     Layout.fillWidth: true
                     label: "Ignore Arguments"
-                    description: "Treat every window of this app as the same launcher"
+                    description: "Clicking the icon launches the bare command, "
+                        + "without any jump list arguments"
 
                     ToggleSwitch {
-                        checked: appRow.modelData.ignoreOptions === true
-                        onToggled: (v) => page.update(appRow.index, "ignoreOptions", v)
+                        checked: page.flagged("ignoreOptions", appRow.modelData.name)
+                        onToggled: (v) => page.toggleFlag("ignoreOptions",
+                            appRow.modelData.name)
                     }
                 }
 

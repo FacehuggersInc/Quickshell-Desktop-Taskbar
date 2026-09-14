@@ -324,7 +324,11 @@ PopupWindow {
 
             ColumnLayout {
                 id: audioColumn
+
+                // Fixed to the viewport. Long media titles were widening the
+                // column, which pushed the device dropdowns off the panel.
                 width: audioScroll.availableWidth
+                Layout.maximumWidth: audioScroll.availableWidth
                 spacing: Theme.gap
 
                 // ── MEDIA ─────────────────────────────────────────
@@ -337,6 +341,8 @@ PopupWindow {
                 CurrentlyPlayingInternal {
                     id: currentlyPlaying
                     Layout.fillWidth: true
+                    // Capped, or a long title widens the whole column
+                    Layout.maximumWidth: audioScroll.availableWidth
                     Layout.alignment: Qt.AlignCenter
                     textColor: root.theme.text
                     textWordWrap: true

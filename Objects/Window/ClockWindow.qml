@@ -778,6 +778,9 @@ PanelWindow {
                                             text: appGroup.modelData.windows.length
                                                 + (appGroup.modelData.windows.length === 1
                                                     ? " window" : " windows")
+                                                + "  ·  " + ClockSystem.formatTotal(
+                                                    appGroup.modelData.total)
+                                                + " lifetime"
                                             color: Theme.accentText
                                             font.family: Theme.fontFamily
                                             font.pixelSize: Theme.descSize
@@ -793,8 +796,8 @@ PanelWindow {
 
                                         Text {
                                             anchors.right: parent.right
-                                            text: ClockSystem.formatTotal(
-                                                appGroup.modelData.total)
+                                            text: ClockSystem.formatSpan(
+                                                appGroup.modelData.session)
                                             color: Theme.accentText
                                             font.family: Theme.fontFamily
                                             font.pixelSize: 16

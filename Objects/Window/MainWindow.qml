@@ -206,6 +206,13 @@ PanelWindow {
         id: alertPopup
     }
 
+    // Owned here so the menu can open it whether or not the notifications
+    // widget is placed in the bar
+    NotificationsPanel {
+        id: sharedNotificationsPanel
+        Component.onCompleted: root.notificationsPanel = sharedNotificationsPanel
+    }
+
     // Full screen when opted in, the quiet popup otherwise — and either way the
     // clock widget animates so the bar itself shows something happened
     Connections {

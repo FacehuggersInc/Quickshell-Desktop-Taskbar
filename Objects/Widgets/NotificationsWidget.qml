@@ -15,13 +15,8 @@ IconButton {
     color: '#252525'
 
     Component.onCompleted: {
-        root.notificationsPanel = notificationsPanel
         root.notifyServer.notification.connect(notifyWidget.onNewNotification)
         notifyWidget.updateBadge()
-    }
-
-    NotificationsPanel {
-        id: notificationsPanel
     }
 
     NotificationPopup {
@@ -65,5 +60,8 @@ IconButton {
 
     onNotificationCountChanged: notifyWidget.updateBadge()
 
-    onClicked: notificationsPanel.toggle(notifyWidget)
+    onClicked: {
+        if (root.notificationsPanel)
+            root.notificationsPanel.toggle(notifyWidget)
+    }
 }

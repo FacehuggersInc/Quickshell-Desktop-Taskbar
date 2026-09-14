@@ -481,7 +481,21 @@ QtObject {
                 if (sys.tracking[j].appClass === key)
                     total = sys.tracking[j].total
             }
-            out.push({ appClass: key, windows: groups[key], total: total })
+
+            // The longest running window is how long this session has been
+            // going — the lifetime total belongs in the other view
+            var session = 0
+            for (var k = 0; k < groups[key].length; k++) {
+                if (groups[key][k].age > session)
+                    session = groups[key][k].age
+            }
+
+            out.push({
+                appClass: key,
+                windows: groups[key],
+                total: total,
+                session: session
+            })
         }
         out.sort(function(a, b) { return b.windows.length - a.windows.length })
         return out

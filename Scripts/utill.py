@@ -657,8 +657,7 @@ class Utill():
     ## reboot costs at most one tick.
 
     def clock_path(self):
-        base = Path(os.environ.get("XDG_CONFIG_HOME") or (HOME / ".config"))
-        return base / "quickshell" / "clock.json"
+        return self.state_path("clock.json")
 
     def clock_load(self):
         path = self.clock_path()
@@ -677,13 +676,16 @@ class Utill():
 
     def clock_save(self, data):
         path = self.clock_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
 
         ## Written beside and moved into place, so a kill mid write cannot
         ## leave a half a file behind
         temp = path.with_suffix(".json.tmp")
         temp.write_text(json.dumps(data, indent=2))
         temp.replace(path)
+        try:
+            path.chmod(0o600)
+        except Exception:
+            pass
         return True
 
     ## ── Alarms ───────────────────────────────────────────────────────────────
@@ -962,9 +964,36 @@ class Utill():
     ## or emptied sync can only ever clear its own cache, never anything typed
     ## by hand.
 
+    ## ── Private state ────────────────────────────────────────────────────────
+    ## Calendar feeds carry secret ical urls and the clock file records what has
+    ## been open and for how long. Neither belongs in .config, which people copy
+    ## into dotfile repositories — this lives under the data directory instead.
+
+    def state_dir(self):
+        base = Path(os.environ.get("XDG_DATA_HOME") or (HOME / ".local/share"))
+        path = base / "quickshell"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def state_path(self, name):
+        path = self.state_dir() / name
+
+        ## Anything left in the old location is moved once, so an existing
+        ## install keeps its data and stops leaking it
+        if not path.exists():
+            legacy = (Path(os.environ.get("XDG_CONFIG_HOME") or (HOME / ".config"))
+                      / "quickshell" / name)
+            if legacy.exists():
+                try:
+                    shutil.move(str(legacy), str(path))
+                    path.chmod(0o600)
+                except Exception:
+                    pass
+
+        return path
+
     def cal_path(self):
-        base = Path(os.environ.get("XDG_CONFIG_HOME") or (HOME / ".config"))
-        return base / "quickshell" / "calendar.json"
+        return self.state_path("calendar.json")
 
     def cal_load(self):
         path = self.cal_path()
@@ -982,7 +1011,6 @@ class Utill():
 
     def cal_save(self, data):
         path = self.cal_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
 
         if path.exists():
             backup = path.with_suffix(".json.bak")
@@ -992,6 +1020,10 @@ class Utill():
                 pass
 
         path.write_text(json.dumps(data, indent=2))
+        try:
+            path.chmod(0o600)
+        except Exception:
+            pass
         return True
 
     ## ── iCal parsing ─────────────────────────────────────────────────────────
