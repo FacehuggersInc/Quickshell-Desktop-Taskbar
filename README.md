@@ -94,6 +94,11 @@ sudo pacman -S awww
 ```
 
 **Audio — required for volume, media controls, and the audio popup:**
+
+Levels are read with `amixer` from alsa-utils. It is easy to lose to
+`paru -c` or `pacman -Rns $(pacman -Qdtq)`, because nothing in the PipeWire
+stack depends on it — if the volume display goes blank, reinstall it first.
+`wpctl` is used as a fallback when alsa-utils is genuinely absent.
 ```bash
 sudo pacman -S pipewire wireplumber alsa-utils playerctl
 ```

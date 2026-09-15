@@ -120,13 +120,20 @@ PopupWindow {
             onStreamFinished: {
                 getDevicesProc.outputs = []
                 getDevicesProc.inputs = []
-                var devices = this.text.split("|")
+                // An empty reply produced one blank entry with no second
+                // field, which threw before any device was read
+                var devices = this.text.trim().split("|")
                 for (var i = 0; i < devices.length; i++) {
                     var device = devices[i]
+                    if (device.trim() === "")
+                        continue
+
                     var parts = device.split(",")
-                    if (parts[1].includes("output")) {
+                    var kind = String(parts.length > 1 ? parts[1] : "")
+
+                    if (kind.indexOf("output") !== -1) {
                         getDevicesProc.outputs.push(device)
-                    } else if (parts[1].includes("input")) {
+                    } else if (kind.indexOf("input") !== -1) {
                         getDevicesProc.inputs.push(device)
                     }
                 }

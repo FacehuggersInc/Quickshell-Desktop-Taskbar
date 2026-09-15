@@ -73,16 +73,23 @@ RowLayout{
             stdout: StdioCollector {
                 onStreamFinished: {
                 
-                    var parts = this.text.split(",")
+                    // A short or empty reply used to throw on parts[1]. The
+                    // reader can return nothing when the audio stack is not
+                    // answering, and that is not an error worth a stack trace.
+                    var parts = this.text.trim().split(",")
+                    while (parts.length < 4)
+                        parts.push("")
+
                     volumeState = parts
-                    var volumeActive = parts[1]
+                    var volumeActive = String(parts[1] || "")
+                    var volumeText = String(parts[0] || "")
 
                     //Volume Percentage / Color
-                    volumeWidget.volumeLevel = parseInt(parts[0].replace("%", "")) || 0
-                    volumeWidget.volumeMuted = !volumeActive.includes("on")
+                    volumeWidget.volumeLevel = parseInt(volumeText.replace("%", "")) || 0
+                    volumeWidget.volumeMuted = volumeActive.indexOf("on") === -1
 
-                    if (volumeActive.includes("on")){
-                        var look = getStyleFromPercentage(parts[0].replace("%", ""))
+                    if (volumeActive.indexOf("on") !== -1){
+                        var look = getStyleFromPercentage(volumeText.replace("%", ""))
                         volumeButton.setColor(look[0])
                         volumeButton.setIcon(look[1])
                         volumeButton.text = volumeWidget.style === "text"

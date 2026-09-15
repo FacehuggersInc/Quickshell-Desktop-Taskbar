@@ -98,11 +98,63 @@ class Utill():
 
     @argfunc
     def getaudio(self, *args):
-        result = subprocess.run(['amixer'], capture_output=True, text=True)
-        lines = result.stdout.split('\n')
+        ## Reported as volume,state,mic,micstate — always four fields, even when
+        ## nothing can be read, so the caller never has to guess.
+        ##
+        ## amixer is the reader. It reports Master and Capture the way the rest
+        ## of the shell expects, and wpctl is only a fallback for a machine
+        ## without alsa-utils — swapping that order changed the readings and
+        ## broke the popup.
+        reading = self.audio_from_amixer()
+        if reading:
+            return reading
+
+        reading = self.audio_from_wpctl()
+        if reading:
+            return reading
+
+        return "", "off", "", "off"
+
+    def audio_from_wpctl(self):
+        def read(target):
+            try:
+                result = subprocess.run(["wpctl", "get-volume", target],
+                                        capture_output=True, text=True, timeout=5)
+            except Exception:
+                return None, None
+            if result.returncode != 0:
+                return None, None
+
+            text = result.stdout.strip()
+            match = re.search(r"([0-9]*\.?[0-9]+)", text)
+            if not match:
+                return None, None
+
+            percent = str(int(round(float(match.group(1)) * 100))) + "%"
+            state = "off" if "MUTED" in text.upper() else "on"
+            return percent, state
+
+        volume, volume_state = read("@DEFAULT_AUDIO_SINK@")
+        if volume is None:
+            return None
+
+        mic, mic_state = read("@DEFAULT_AUDIO_SOURCE@")
+        return volume, volume_state, mic or "", mic_state or "off"
+
+    def audio_from_amixer(self):
+        try:
+            result = subprocess.run(["amixer"], capture_output=True,
+                                    text=True, timeout=5)
+        except Exception:
+            return None
+        if result.returncode != 0:
+            return None
+
+        lines = result.stdout.split("\n")
         found_vol = found_mic = False
         found_vol_block = found_mic_block = False
         volume = volume_mute = mic_volume = mic_mute = ""
+
         for line in lines:
             if "Master" in line: found_vol_block = True
             if found_vol_block and '%' in line and not found_vol:
@@ -114,6 +166,9 @@ class Utill():
                 mic_mute = line.split('[')[-1].split("]")[0].strip()
                 mic_volume = line.split('[', 1)[-1].split("]")[0].strip()
                 found_mic = True
+
+        if not volume:
+            return None
         return volume, volume_mute, mic_volume, mic_mute
 
     @argfunc

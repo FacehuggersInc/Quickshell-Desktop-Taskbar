@@ -46,6 +46,8 @@ ColumnLayout {
         var current = -1
         for (var i = 0; i < items.length; i++) {
             var parts = items[i].split(",")
+            // The popup checks this; this copy did not
+            if (parts.length < 4) continue
             options.push({ label: parts[3], value: parseInt(parts[0]) })
             if (parts[2].includes("True")) current = parseInt(parts[0])
         }
